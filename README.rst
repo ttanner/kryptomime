@@ -36,20 +36,18 @@ To install this package from this git repository, do:
 Optionally to build the documentation after installation, do:
 ``cd docs make html``
 
-This is a simple example on how to use kryptomime:
-``
->>> from kryptomime import create_mail, GPGMIME
->>> import gnupg
->>> gpg = gnupg.GPG(home='gpghome')
->>> krypto = GPGMIME(gpg,default_key=('foo@bar.com','passphrase'))
->>> msg = create_mail('foo@bar.com','bar@fnord.net','subject','body\nmessage')
->>> sgnmsg,results = krypto.sign(msg)
->>> verified, results = krypto.verify(sgnmsg)
->>> rawmsg,signed = krypto.strip_signature(sgnmsg)
->>> encmsg,results = krypto.encrypt(msg,sign=True)
->>> verified, results = krypto.verify(encmsg)
->>> decmsg, verified, results = krypto.decrypt(encmsg)
-``
+This is a simple example on how to use kryptomime::
+    >>> from kryptomime import create_mail, GPGMIME
+    >>> import gnupg
+    >>> gpg = gnupg.GPG(home='gpghome')
+    >>> krypto = GPGMIME(gpg,default_key=('foo@bar.com','passphrase'))
+    >>> msg = create_mail('foo@bar.com','bar@fnord.net','subject','body\nmessage')
+    >>> sgnmsg,results = krypto.sign(msg)
+    >>> verified, results = krypto.verify(sgnmsg)
+    >>> rawmsg,signed = krypto.strip_signature(sgnmsg)
+    >>> encmsg,results = krypto.encrypt(msg,sign=True)
+    >>> verified, results = krypto.verify(encmsg)
+    >>> decmsg, verified, results = krypto.decrypt(encmsg)
 
 Bug Reports & Feature Requests
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
