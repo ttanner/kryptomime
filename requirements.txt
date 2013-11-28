@@ -1,0 +1,41 @@
+#
+# python-gnupg/requirements.txt
+# -----------------------------
+# Pip requirements.txt file. This file is also parsed for distribute to use in
+# setup.py.
+#______________________________________________________________________________
+#
+# Force pip upgrade due to security vulnerabilities.
+#
+# This has actually has little to do with installing python-gnupg, since
+# older versions of pip would install everything just fine. except that, in
+# my opinion, using GnuPG for privacy is silly when the installation of
+# python-gnupg with an older version of pip is trivially exploitable through
+# a MITM attack. see https://github.com/pypa/pip/pull/791
+#
+# Also, note that SSL package delivery is *not* entirely fixed yet. See
+# https://github.com/TheTorProject/ooni-backend/pull/1#discussion_r4084881
+#
+#pip>=1.3.1
+#
+# NOTE: setuptools is currently (as of 27 May 2013) being merged back into its
+# parent project, distribute. By using the included distribute_setup.py
+# script, we make sure that we have a recent version of setuptools/distribute,
+# which is the *only* Python packaging framework compatible at this point with
+# both Python>=2.4 and Python3.x.
+#
+# A new version of distribute is necessary due to the merging of setuptools
+# back into its parent project, distribute. Also, the only way to package for
+# both Python 2 and 3 is to use distribute.
+#
+#distribute>=0.6.45
+#
+# Sphinx is only necessary for building documentation, so it is added in
+# setup.py under extras_require['docs'].
+#
+# If you want to build the documentation, uncomment this line:
+#Sphinx>=1.1
+#
+# And, this one is actually used in the gnupg module code:
+#
+gnupg>=1.2.3

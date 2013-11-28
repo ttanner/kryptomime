@@ -1,0 +1,71 @@
+*.py[cod]
+
+# C extensions
+*.so
+
+# Packages
+*.egg
+*.egg-info
+dist
+build
+eggs
+parts
+bin
+var
+sdist
+develop-eggs
+.installed.cfg
+lib
+lib64
+setup.cfg
+
+# Installer logs
+pip-log.txt
+
+# Unit test / coverage reports
+.coverage
+.tox
+nosetests.xml
+
+# Translations
+*.mo
+
+# Mr Developer
+.mr.developer.cfg
+.project
+.pydevproject
+
+# Temp files
+.\#*
+\#*\#
+*~
+
+# tags
+TAGS
+tags
+
+# notes
+*.org
+
+# Ignore distutils record of installed files:
+installed-files.txt
+
+# Ignore PyCharm files:
+.idea/*
+
+# and git-tickets and tickets:
+.tickets/*
+tickets/*
+TICKET-*
+
+# Ignore virtualenv folders, if they are here:
+include/*
+local/*
+
+# setuptools/distribute files:
+PKG-INFO
+MANIFEST
+
+# Ignore log files and directories from tests:
+test/*
+
