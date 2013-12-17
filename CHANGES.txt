@@ -1,1 +1,8 @@
-v0.1.0, 26.11.2013 -- initial release.
+v0.1.1, 17.12.2013
+------------------
+- typos, grammar
+- minimal bugfix in GPGMIME.sign_file
+
+v0.1.0, 26.11.2013
+------------------
+- initial release.

@@ -9,7 +9,7 @@ Disclaimer
 
 Proper kryptography requires security audits of the complete system.
 Even though the author is not aware of any bugs in this software, it
-comes ABSOLUTELY NO WARRANTY. USE THIS SOFTWARE AT YOUR OWN RISK.
+comes with ABSOLUTELY NO WARRANTY. USE THIS SOFTWARE AT YOUR OWN RISK.
 
 Installation
 ~~~~~~~~~~~~
@@ -24,19 +24,20 @@ From `PyPI <https://pypi.python.org>`__
 From this git repository
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-To install this package from this git repository, do:
-
-::
+To install this package from this git repository, do::
 
     git clone https://github.com/ttanner/kryptomime.git
     cd kryptomime
     python setup.py install
     python setup.py test
 
-Optionally to build the documentation after installation, do:
-``cd docs make html``
+Optionally to build the documentation after installation, do::
 
-This is a simple example on how to use kryptomime::
+    cd docs
+    make html
+
+This is a simple example of how to use kryptomime::
+
     >>> from kryptomime import create_mail, GPGMIME
     >>> import gnupg
     >>> gpg = gnupg.GPG(home='gpghome')

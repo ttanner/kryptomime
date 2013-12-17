@@ -128,7 +128,7 @@ class KryptoMIME(object):
 
     def analyze(self,mail):
         """Checks whether the email is encrypted or signed.
-        
+
         :param mail: A string or email
         :returns: Whether the email is encrypted and whether it is signed (if it is not encrypted).
         :rtype: (bool,bool/None)
@@ -137,7 +137,7 @@ class KryptoMIME(object):
 
     def strip_signature(self,mail):
         """Returns the raw email without signature. Does not check for valid signature.
-        
+
         :param mail: A string or email
         :returns: An email without signature and whether the input was signed
         :rtype: (Message,bool)
@@ -146,7 +146,7 @@ class KryptoMIME(object):
 
     def verify(self, mail, **kwargs):
         """Verifies the validity of the signature of an email.
-        
+
         :type mail: string or Message object
         :param mail: A string or email
         :returns: whether the input was signed by the sender and detailed results
@@ -156,7 +156,7 @@ class KryptoMIME(object):
 
     def decrypt(self, mail, **kwargs):
         """Decrypts and verifies an email.
-        
+
         :param mail: A string or email
         :type mail: string or Message object
         :returns: An email without signature (None if the decryption failed),
@@ -167,7 +167,7 @@ class KryptoMIME(object):
 
     def sign(self, mail, verify=True, **kwargs):
         """Signs an email with the sender's (From) signature.
-        
+
         :param mail: A string or email
         :type mail: string or Message object
         :param verify: Whether to verify the signed mail immediately
@@ -179,7 +179,7 @@ class KryptoMIME(object):
 
     def encrypt(self, mail, sign=True, verify=False, **kwargs):
         """Encrypts an email for the recipients in To/CC.
-        
+
         :param mail: A string or email
         :type mail: string or Message object
         :param sign: Whether to sign the mail with the sender's (From) signature

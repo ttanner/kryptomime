@@ -563,7 +563,7 @@ class GPGMIME(PGPMIME):
         return self._set_default_key(kwargs)
 
     def sign_file(self, file, **kwargs):
-        return self.gpg.sign_file(file, **self._sign_params(kwargs))
+        return self.gpg.sign(file, **self._sign_params(kwargs))
 
     def sign_str(self, data, **kwargs):
         return self.gpg.sign(data, **self._sign_params(kwargs))
