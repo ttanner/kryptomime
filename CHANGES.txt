@@ -1,3 +1,8 @@
+v0.1.2, 27.12.2013
+------------------
+- more test coverage
+- bugfixes: passphrases for default_key, report whether message was signed, look for valid signature in decrypted message
+
 v0.1.1, 17.12.2013
 ------------------
 - typos, grammar
