@@ -262,7 +262,7 @@ class PGPMIME(KryptoMIME):
         "returns mail without signature, whether it was signed and with which keyids"
         from .mail import protect_mail
         results, key_ids = [], []
-        signed = False
+        signed, fmt = False, False
         for signature in signatures:
             for ending in (None,'\n','\r\n'):
                 if ending:
@@ -274,14 +274,15 @@ class PGPMIME(KryptoMIME):
                 else:
                     signature = self._fix_quoting(signature)
                     result = self.verify_str(tmp, signature)
-                if signed or strict: break # already found format
-                if result: # found
-                    if not signed and ending:
+                if result.key_id: signed = True
+                if fmt or strict: break # already found format
+                if result: # found valid
+                    if not fmt and ending:
                         payload = tmp # correct format
                         rawmail = protect_mail(rawmail,ending=ending,sevenbit=False)
+                        fmt = True
                     break
-            if not result: continue # no signature
-            signed = True
+            if not result: continue # no valid signature
             key_ids.append(result.key_id)
             results.append(result)
         return rawmail, {'signed':signed,'key_ids':key_ids,'results':results}
@@ -317,18 +318,22 @@ class PGPMIME(KryptoMIME):
             ciphertext = self._fix_quoting(ciphertext)
             result = self.decrypt_str(ciphertext, **kwargs)
             results['decryption'] = result
-            if not result: return False, results # cannot decrypt
+            if not result.ok:
+                results['signed'] = None # unknown
+                return False, results # cannot decrypt
+            if result.key_id: results['signed'] = True
             if result.valid:
-                results['signed'] = True
                 results['key_ids'] = [result.key_id]
                 results['results'] = [result]
-                return sender == result.key_id, results
+                if sender == result.key_id: return True, results
             plaintext = str(result)
             mail = self._decoded(mail,plaintext,is_pgpmime)
         payload, signatures, rawmail = self._signature(mail)
         if not payload: return False, results # no plain msg
         rawmail, sresults = self._check_signatures(payload, signatures, rawmail, strict=strict)
-        results.update(sresults)
+        if sresults['signed']: results['signed'] = True
+        results['key_ids'].extend(sresults['key_ids'])
+        results['results'].extend(sresults['results'])
         return results['signed'] and sender in results['key_ids'], results
 
     def decrypt(self, mail, strict=True, **kwargs):
@@ -363,18 +368,22 @@ class PGPMIME(KryptoMIME):
             ciphertext = self._fix_quoting(ciphertext)
             result = self.decrypt_str(ciphertext, **kwargs)
             results['decryption'] = result
-            if not result: return None, False, results
+            if not result.ok:
+                results['signed'] = None # unknown
+                return None, False, results # cannot decrypt
+            if result.key_id: results['signed'] = True
             plaintext = str(result)
             mail = self._decoded(mail,plaintext,is_pgpmime)
             if result.valid:
-                results['signed'] = True
                 results['key_ids'] = [result.key_id]
                 results['results'] = [result]
-                return mail, sender == result.key_id, results
+                if sender == result.key_id: return mail, True, results
         payload, signatures, rawmail = self._signature(mail)
         if not payload: return rawmail, False, results # no plain msg
         rawmail, sresults = self._check_signatures(payload, signatures, rawmail, strict=strict)
-        results.update(sresults)
+        if sresults['signed']: results['signed'] = True
+        results['key_ids'].extend(sresults['key_ids'])
+        results['results'].extend(sresults['results'])
         return rawmail, results['signed'] and sender in results['key_ids'], results
 
     def sign(self, mail, inline=False, verify=False, **kwargs):
@@ -514,7 +523,7 @@ class GPGMIME(PGPMIME):
             if defkey: default_key = defkey
         elif len(default_key)==2 and default_key[0]:
             defkey = self.find_key(default_key[0],secret=True)
-            if defkey: default_key = (defkey,default_key[0])
+            if defkey: default_key = (defkey,default_key[1])
         else: assert False, "default_key must be keyid or (keyid,passphrase)"
         super(GPGMIME,self).__init__(default_key)
 
@@ -525,13 +534,13 @@ class GPGMIME(PGPMIME):
                 del kwargs['default_key']
                 return kwargs
             if type(self.default_key) in (tuple,list):
-                defkey,passphrase= self.default_key
+                defkey,passphrase = self.default_key
             else:
-                defkey,passphrase= self.default_key,None
+                defkey,passphrase = self.default_key,None
             if key==True:
                 kwargs['default_key'] = defkey
             elif key != defkey:
-                 return kwargs
+                return kwargs
             if not 'passphrase' in kwargs and passphrase:
                 kwargs['passphrase'] = passphrase
         return kwargs
