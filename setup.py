@@ -30,7 +30,7 @@ setuptools.setup(
     long_description=open('README.rst').read(),
     license="GPLv3+",
 
-    version='0.1.2',
+    version='0.1.3',
     author=__author__,
     author_email=__contact__,
     maintainer=__author__,
