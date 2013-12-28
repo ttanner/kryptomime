@@ -517,8 +517,24 @@ class PGPMIME(KryptoMIME):
             encmail.attach(submsg)
         return encmail, result
 
+def find_gnupg_key(gpg,addr,secret=False):
+    """find keyid for email 'addr' or return None.
+    If addr is a list or tuple, return a dict(addr:keyid) """
+    import email.utils
+    if type(addr) in (list,tuple):
+        result = {}
+        for a in addr: result[a] = find_gnupg_key(gpg,a,secret)
+        return result
+    addr = email.utils.parseaddr(addr)[1]
+    if not addr: return None
+    for key in gpg.list_keys(secret):
+        for uid in key['uids']:
+            if uid.find(addr)>=0:
+                return key['keyid']
+    return None
+
 class GPGMIME(PGPMIME):
-    "A PGP implementation based on GPG and the gnupg module"
+    "A PGP implementation based on GNUPG and the gnupg module"
     
     def __init__(self, gpg, default_key=None):
         "initialize with a gnupg instance and optionally a default_key (keyid,passphrase) tuple"
@@ -552,20 +568,9 @@ class GPGMIME(PGPMIME):
         return kwargs
 
     def find_key(self,addr,secret=False):
-        """find key (fingerprint) for email 'addr' or return None.
+        """find keyid for email 'addr' or return None.
         If addr is a list or tuple, return a dict(addr:keyid) """
-        import email.utils
-        if type(addr) in (list,tuple):
-            result = {}
-            for a in addr: result[a] = self.find_key(a,secret)
-            return result
-        addr = email.utils.parseaddr(addr)[1]
-        if not addr: return None
-        for key in self.gpg.list_keys(secret):
-            for uid in key['uids']:
-                if uid.find(addr)>=0:
-                    return key['keyid']
-        return None
+        return find_gnupg_key(self.gpg,addr,secret)
 
     def _sign_params(self, kwargs):
         if self.default_key and not 'default_key' in kwargs:
@@ -603,12 +608,12 @@ class GPGMIME(PGPMIME):
             if kwargs['sign']: kwargs['default_key'] = kwargs['sign']
             del kwargs['sign']
         kwargs = self._set_default_key(kwargs)
-        fingerprints = []
+        keyids = []
         for recipient in recipients:
             key = self.find_key(recipient)
-            if key: fingerprints.append(key)
-            else: fingerprints.append(recipient)
-        return fingerprints, kwargs
+            if key: keyids.append(key)
+            else: keyids.append(recipient)
+        return keyids, kwargs
 
     def encrypt_file(self, file, recipients, **kwargs):
         recipients, kwargs = self._encrypt_params(recipients, kwargs)
