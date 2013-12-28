@@ -6,6 +6,7 @@ python:
   - "2.7"
   - "3.3"
 install:
+  - pip install gnupg
   - python setup.py install
 script:
   - python setup.py test
