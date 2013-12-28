@@ -21,7 +21,7 @@
 
 from unittest import TestCase, main
 
-from kryptomime.mail import protect_mail
+from ..mail import protect_mail
 
 def test_protect():
     #> From foo

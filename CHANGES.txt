@@ -1,3 +1,9 @@
+v0.1.3, 28.12.2013
+------------------
+- encrypt to sender by default (toself)
+- more tests: analyze, auto-verifiy, non-strict verify, inline encrypt
+- bugfixes: six dependency, no-strict verification, default_key/passphrase handling, auto-verficiation
+
 v0.1.2, 27.12.2013
 ------------------
 - more test coverage
