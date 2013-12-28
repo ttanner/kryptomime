@@ -42,7 +42,7 @@ setuptools.setup(
     package_data={'': ['README.rst', 'COPYING.txt', 'requirements.txt']},
 
     test_suite='kryptomime.tests',
-    tests_require=['nose'],
+    tests_require=['nose','coverage'],
 
     install_requires=['gnupg>=1.2.3','six>=1.4.1'],
     extras_require={'docs': ["Sphinx>=1.1", "repoze.sphinx"]},

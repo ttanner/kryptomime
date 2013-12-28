@@ -8,4 +8,4 @@ python:
 install:
   - python setup.py install
 script:
-  - nosetests --with-coverage --cover-package=kryptomime --cover-erase -exe -v -w kryptomime/tests
+  - nosetests --with-coverage --cover-package=kryptomime --cover-erase --exe -v -w kryptomime/tests
