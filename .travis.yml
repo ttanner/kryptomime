@@ -6,7 +6,9 @@ python:
   - "2.7"
   - "3.3"
 install:
-  - pip install gnupg
+  - easy_install -U gnupg
+  - easy_install -U nose
+  - easy_install -U coverage
   - python setup.py install
 script:
   - nosetests --with-coverage --cover-package=kryptomime --cover-erase --exe -v -w kryptomime/tests
