@@ -44,7 +44,7 @@ setuptools.setup(
     test_suite='kryptomime.tests',
     tests_require=['nose','coverage'],
 
-    install_requires=['gnupg>=1.2.3','six>=1.4.1'],
+    install_requires=['gnupg>=1.2.5','six>=1.4.1'],
     extras_require={'docs': ["Sphinx>=1.1", "repoze.sphinx"]},
 
     platforms="Linux, BSD, OSX, Windows",

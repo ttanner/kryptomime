@@ -588,19 +588,24 @@ class GPGMIME(PGPMIME):
 
     def verify_str(self, data, signature=None):
         import gnupg
-        f = gnupg._util._make_binary_stream(data, self.gpg._encoding)
         if signature:
             import os, tempfile
             tmp = tempfile.NamedTemporaryFile(prefix='gnupg',delete=False)
-            fd = tmp.file
-            fn = tmp.name
+            fd, f = tmp.file, tmp.name
+            fd.write(data)
+            fd.close()
+            tmp = tempfile.NamedTemporaryFile(prefix='gnupg',delete=False)
+            fd, fn = tmp.file, tmp.name
             fd.write(signature)
             fd.close()
             try: result = self.gpg.verify_file(f,fn)
-            finally: os.unlink(fn)
+            finally: 
+                os.unlink(f)
+                os.unlink(fn)
         else:
+            f = gnupg._util._make_binary_stream(data, self.gpg._encoding)
             result = self.gpg.verify_file(f)
-        f.close()
+            f.close()
         return result
 
     def _encrypt_params(self, recipients, kwargs):
