@@ -6,3 +6,4 @@ include docs/*.py
 include docs/Makefile
 include docs/make.bat
 include kryptomime/tests/*.py
+include kryptomime/tests/*ring?

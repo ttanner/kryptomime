@@ -51,7 +51,7 @@ class PGPMIME(KryptoMIME):
 
     def decrypt_file(self, file, **kwargs):
         return NotImplementedError
-    
+
     def decrypt_str(self, data, **kwargs):
         return NotImplementedError
 
@@ -230,7 +230,7 @@ class PGPMIME(KryptoMIME):
 
     def analyze(self,mail):
         """Checks whether the email is encrypted or signed.
-        
+
         :param mail: A string or email
         :returns: Whether the email is encrypted and whether it is signed (if it is not encrypted).
         :rtype: (bool,bool/None)
@@ -246,7 +246,7 @@ class PGPMIME(KryptoMIME):
 
     def strip_signature(self,mail):
         """Returns the raw email without signature. Does not check for valid signature.
-        
+
         :param mail: A string or email
         :returns: An email without signature and whether the input was signed
         :rtype: (Message,bool)
@@ -289,7 +289,7 @@ class PGPMIME(KryptoMIME):
 
     def verify(self, mail, strict=True, **kwargs):
         """Verifies the validity of the signature of an email.
-        
+
         :type mail: string or Message object
         :param mail: A string or email
         :param strict: Whether verify the message as is. Otherwise try with different line endings.
@@ -338,7 +338,7 @@ class PGPMIME(KryptoMIME):
 
     def decrypt(self, mail, strict=True, **kwargs):
         """Decrypts and verifies an email.
-        
+
         :param mail: A string or email
         :type mail: string or Message object
         :param strict: Whether verify the message as is. Otherwise try with different line endings.
@@ -388,7 +388,7 @@ class PGPMIME(KryptoMIME):
 
     def sign(self, mail, inline=False, verify=False, **kwargs):
         """Signs an email with the sender's (From) signature.
-        
+
         :param mail: A string or email
         :type mail: string or Message object
         :param inline: Whether to use the PGP inline format for messages with attachments, i.e. no multipart.
@@ -450,7 +450,7 @@ class PGPMIME(KryptoMIME):
 
     def encrypt(self, mail, sign=True, inline=False, toself=True, verify=False, **kwargs):
         """Encrypts an email for the recipients in To/CC.
-        
+
         :param mail: A string or email
         :type mail: string or Message object
         :param sign: Whether to sign the mail with the sender's (From) signature.
@@ -535,7 +535,7 @@ def find_gnupg_key(gpg,addr,secret=False):
 
 class GPGMIME(PGPMIME):
     "A PGP implementation based on GNUPG and the gnupg module"
-    
+
     def __init__(self, gpg, default_key=None):
         "initialize with a gnupg instance and optionally a default_key (keyid,passphrase) tuple"
         self.gpg = gpg
@@ -608,6 +608,18 @@ class GPGMIME(PGPMIME):
             f.close()
         return result
 
+    def without_signature(self, data):
+        "remove signature from string, if present"
+        if len(data)<=10: return data # no signature
+        firstline = data.splitlines()[0]
+        if firstline!='-----BEGIN PGP SIGNED MESSAGE-----':
+            return data # no signature
+        text = ''
+        for line in data.splitlines(True)[3:]: # remove first three lines
+            if line.rstrip()=='-----BEGIN PGP SIGNATURE-----': break
+            text += line
+        return text
+
     def _encrypt_params(self, recipients, kwargs):
         if 'sign' in kwargs:
             if kwargs['sign']: kwargs['default_key'] = kwargs['sign']
@@ -632,7 +644,7 @@ class GPGMIME(PGPMIME):
         kwargs = self._set_default_key(kwargs)
         if 'default_key' in kwargs: del kwargs['default_key']
         return self.gpg.decrypt_file(file, **kwargs)
-    
+
     def decrypt_str(self, data, **kwargs):
         kwargs = self._set_default_key(kwargs)
         if 'default_key' in kwargs: del kwargs['default_key']

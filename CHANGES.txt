@@ -1,3 +1,7 @@
+v0.1.4, 02.01.2014
+------------------
+- add without_signature function
+
 v0.1.3, 29.12.2013
 ------------------
 - encrypt to sender by default (toself)
