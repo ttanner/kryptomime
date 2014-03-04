@@ -11,6 +11,8 @@ Proper kryptography requires security audits of the complete system.
 Even though the author is not aware of any bugs in this software, it
 comes with ABSOLUTELY NO WARRANTY. USE THIS SOFTWARE AT YOUR OWN RISK.
 
+.. image:: https://travis-ci.org/ttanner/kryptomime.png?branch=master :target: https://travis-ci.org/ttanner/kryptomime
+
 Installation
 ~~~~~~~~~~~~
 
