@@ -403,8 +403,13 @@ class PGPMIME(KryptoMIME):
         from .mail import protect_mail
         if not isinstance(mail,(Message,str)): return None, None
         mail = protect_mail(mail,ending='\r\n',sevenbit=True) # fix line endings + 7bit
-        if not 'default_key' in kwargs: kwargs['default_key'] = True
-        if kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
+        if not 'default_key' in kwargs:
+            if not self.default_key: return None, {} # key required
+            import email.utils
+            sender = mail.get('from', [])
+            sender = email.utils.parseaddr(sender)[1]
+            kwargs['default_key'] = sender
+        elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
             return None, {} # key required
         plaintext, submsg = self._plaintext(mail, inline)
         # Generate signature, report errors
@@ -475,8 +480,10 @@ class PGPMIME(KryptoMIME):
         recipients = [email.utils.formataddr(to) for to in email.utils.getaddresses(tos + ccs)]
         if toself and not sender in recipients: recipients.append(sender)
         if sign:
-            if not 'default_key' in kwargs: kwargs['default_key'] = True
-            if kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
+            if not 'default_key' in kwargs:
+                if not self.default_key: return None, {} # key required
+                kwargs['default_key'] = sender
+            elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
                 return None, {} # key required
         plaintext, submsg = self._plaintext(mail, inline, protect=False)
         # Do encryption, report errors
