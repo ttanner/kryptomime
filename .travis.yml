@@ -4,6 +4,8 @@ before_install:
 python:
   - "2.7"
 install:
+  # Work around https://github.com/travis-ci/travis-ci/issues/1588
+  - echo -e "Host *\n\tStrictHostKeyChecking no\n" >> ~/.ssh/config
   - git clone git@github.com:isislovecruft/python-gnupg.git
   - cd python-gnupg
   - git config --add remote.origin.fetch "+refs/pull/*/head:refs/remotes/origin/pr/*"
