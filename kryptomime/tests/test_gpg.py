@@ -115,7 +115,7 @@ class UnilateralTest(TestCase):
         cls.id1 = GPGMIME(cls.gpg,default_key=(sender,passphrase))
         cls.id2 = GPGMIME(gpg2,default_key=receiver)
         cls.sgn = cls.id1.sign(msg)[0]
-        cls.enc = cls.id1.encrypt(msg,sign=False)[0]
+        cls.enc = cls.id1.encrypt(msg,toself=False,sign=False)[0]
 
     @classmethod
     def tearDownClass(cls):

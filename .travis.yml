@@ -3,7 +3,6 @@ before_install:
   - sudo apt-get install gnupg
 python:
   - "2.7"
-  - "3.3"
 install:
   - easy_install -U gnupg
   - easy_install -U psutil
