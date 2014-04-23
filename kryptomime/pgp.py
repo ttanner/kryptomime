@@ -61,7 +61,7 @@ class PGPMIME(KryptoMIME):
     def _fix_quoting(text):
         "fix broken Thunderbird quoting"
         import re
-        text = re.sub('^=3D','=',text,flags=re.MULTILINE)
+        text = re.sub(re.compile('^=3D',flags=re.MULTILINE),'=',text)
         return text
 
     @staticmethod
@@ -616,11 +616,11 @@ class GPGMIME(PGPMIME):
         import gnupg
         if signature:
             import os, tempfile
-            tmp = tempfile.NamedTemporaryFile(prefix='gnupg',delete=False)
+            tmp = tempfile.NamedTemporaryFile(mode='w+',prefix='gnupg',delete=False)
             fd, f = tmp.file, tmp.name
             fd.write(data)
             fd.close()
-            tmp = tempfile.NamedTemporaryFile(prefix='gnupg',delete=False)
+            tmp = tempfile.NamedTemporaryFile(mode='w+',prefix='gnupg',delete=False)
             fd, fn = tmp.file, tmp.name
             fd.write(signature)
             fd.close()

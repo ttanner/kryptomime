@@ -1,5 +1,5 @@
 #
-# python-gnupg/requirements.txt
+# kryptomime/requirements.txt
 # -----------------------------
 # Pip requirements.txt file. This file is also parsed for distribute to use in
 # setup.py.
@@ -38,4 +38,4 @@
 #
 # And, this one is actually used in the gnupg module code:
 #
-gnupg>=1.2.3
+gnupg>=1.2.5
