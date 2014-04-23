@@ -1,3 +1,10 @@
+v0.1.5, 23.04.2014
+------------------
+- passes all tests with python 2.6, 2.7, 3.3 and 3.4 with patch python-gnupg
+- GPGMIME.pubkey_attachment: new function
+- mail.create_mail: new time and headers parameters
+- fixed default_key handling
+
 v0.1.4, 02.01.2014
 ------------------
 - add without_signature function
