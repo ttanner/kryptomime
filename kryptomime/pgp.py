@@ -403,11 +403,9 @@ class PGPMIME(KryptoMIME):
         from .mail import protect_mail
         if not isinstance(mail,(Message,str)): return None, None
         mail = protect_mail(mail,ending='\r\n',sevenbit=True) # fix line endings + 7bit
-        if not 'default_key' in kwargs:
-            import email.utils
-            sender = mail.get('from', [])
-            sender = email.utils.parseaddr(sender)[1]
-            kwargs['default_key'] = sender
+        if not 'default_key' in kwargs: kwargs['default_key'] = True
+        if kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
+            return None, {} # key required
         plaintext, submsg = self._plaintext(mail, inline)
         # Generate signature, report errors
         if not mail.is_multipart() and inline:
@@ -476,7 +474,10 @@ class PGPMIME(KryptoMIME):
         ccs = mail.get_all('cc', [])
         recipients = [email.utils.formataddr(to) for to in email.utils.getaddresses(tos + ccs)]
         if toself and not sender in recipients: recipients.append(sender)
-        if sign and not 'default_key' in kwargs: kwargs['default_key'] = sender
+        if sign:
+            if not 'default_key' in kwargs: kwargs['default_key'] = True
+            if kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
+                return None, {} # key required
         plaintext, submsg = self._plaintext(mail, inline, protect=False)
         # Do encryption, report errors
         kwargs['sign'] = sign
@@ -550,19 +551,22 @@ class GPGMIME(PGPMIME):
         super(GPGMIME,self).__init__(default_key)
 
     def _set_default_key(self,kwargs):
-        if self.default_key and 'default_key' in kwargs:
-            key = kwargs['default_key']
-            if not key:
-                del kwargs['default_key']
-                return kwargs
+        if not 'default_key' in kwargs: return kwargs
+        key = kwargs['default_key']
+        if not key:
+            del kwargs['default_key']
+            return kwargs
+        if key!=True:
+            key = self.find_key(key,secret=True)
+        else: assert self.default_key, "default key missing"
+        if self.default_key:
             if type(self.default_key) in (tuple,list):
                 defkey,passphrase = self.default_key
             else:
                 defkey,passphrase = self.default_key,None
             if key!=True:
-                key = self.find_key(key,secret=True)
                 if key != defkey: return kwargs
-            kwargs['default_key'] = defkey
+            else: kwargs['default_key'] = defkey
             if not 'passphrase' in kwargs and passphrase:
                 kwargs['passphrase'] = passphrase
         return kwargs
@@ -619,6 +623,18 @@ class GPGMIME(PGPMIME):
             if line.rstrip()=='-----BEGIN PGP SIGNATURE-----': break
             text += line
         return text
+
+    def pubkey_attachment(self,key):
+        "returns an attachment with the specified public key"
+        from email.mime.text import MIMEText
+        key = self.find_key(key) or key
+        pubkey = self.gpg.export_keys(key)
+        attach = MIMEText(pubkey)
+        attach.set_type("application/pgp-keys")
+        fname= key+'.asc'
+        attach.set_param('name',fname)
+        attach.add_header('Content-Disposition', 'attachment', filename=fname)
+        return attach
 
     def _encrypt_params(self, recipients, kwargs):
         if 'sign' in kwargs:

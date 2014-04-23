@@ -105,21 +105,32 @@ def protect_mail(mail,ending='\r\n',sevenbit=True):
         if ending: mail.set_payload(fix_lines(mail.get_payload(),ending=ending))
     return mail
 
-def create_mail(fro,to,subject,body,cc='',attach=None):
-    "create an email with sender 'fro', receivers 'to', subject and body, optional attachmens and CC"
-    import time, email.mime.text, email.mime.multipart, email.utils
+def create_mail(sender,to,subject,body,cc='',attach=None,time=None,headers={}):
+    """create an email with sender 'sender', receivers 'to', subject and body,
+     optional CC, attachments, extra headers and time"""
+    import email.mime.text, email.mime.multipart, email.utils
+    import time as time_mod
+    from six import iteritems
     msg = email.mime.text.MIMEText(fix_lines(body,replace=False))
     if not attach is None:
         mmsg = email.mime.multipart.MIMEMultipart()
         mmsg.attach(msg)
         for msg in attach: mmsg.attach(msg)
         msg = mmsg
-    msg.set_unixfrom(fro)
-    msg['From'] = fro
+    msg.set_unixfrom(sender)
+    msg['From'] = sender
     msg['To'] = to
     if cc: msg['CC'] = cc
     msg['Subject'] = subject
-    msg['Date'] = email.utils.formatdate(time.time(),localtime=True)
+    if not time: time = time_mod.time()
+    msg['Date'] = email.utils.formatdate(time,localtime=True)
+    for k, v in iteritems(headers):
+        if k.lower()=='content-type':
+            msg.set_type(v)
+        elif msg.has_key(k):
+            msg.replace_header(k,v)
+        else:
+            msg.add_header(k,v)
     return msg
 
 class KryptoMIME(object):
