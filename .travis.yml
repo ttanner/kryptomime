@@ -7,6 +7,8 @@ install:
   - git clone https://github.com/isislovecruft/python-gnupg.git
   - cd python-gnupg
   - git config --add remote.origin.fetch "+refs/pull/*/head:refs/remotes/origin/pr/*"
+  - git config user.email "foo@bar.com"
+  - git config user.name "Foo"
   - git fetch origin
   - git merge --log -m "" origin/pr/32
   - git merge --log -m "" origin/pr/33
