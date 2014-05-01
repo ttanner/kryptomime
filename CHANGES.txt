@@ -1,3 +1,11 @@
+v0.2.0, 01.05.2014
+------------------
+- added kryptomime.version
+- detect signed single-part mails
+- major bugfixes for secure IMAP and SMTP transport
+- bugfixes for default key: always lookup key ids
+- more tests
+
 v0.1.5, 23.04.2014
 ------------------
 - passes all tests with python 2.6, 2.7, 3.3 and 3.4 with patch python-gnupg

@@ -21,3 +21,4 @@
 from .mail import KryptoMIME, ProtectedMessage, create_mail, protect_mail
 from .pgp import GPGMIME
 from .transport import IMAP4_TLS, SMTP_TLS
+version = (0,2,0) # major (backwards incompatible), minor (backwards compatible, feature-level), implementation (bugfixes)

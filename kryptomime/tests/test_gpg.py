@@ -371,16 +371,16 @@ class BilateralTest(TestCase):
         self.bad_encrypt(True)
 
     def test_file(self):
-        from six.moves import cStringIO
+        from io import BytesIO
         id1, id2 = self.id1, self.id2
-        secret = 'some\nsecret'
-        sgn = id1.sign_file(cStringIO(secret))
+        secret = 'some\nsecret'.encode('ascii')
+        sgn = id1.sign_file(BytesIO(secret))
         assert sgn
-        assert id2.verify_file(cStringIO(str(sgn)))
-        enc = id1.encrypt_file(cStringIO(secret),[receiver],sign=sender)
+        assert id2.verify_file(BytesIO(str(sgn).encode('ascii')))
+        enc = id1.encrypt_file(BytesIO(secret),[receiver],sign=sender)
         assert enc
-        result = id2.decrypt_file(cStringIO(str(enc)))
-        assert str(result) == secret
+        result = id2.decrypt_file(BytesIO(str(enc).encode('ascii')))
+        assert str(result).encode('ascii') == secret
 
 if __name__ == '__main__':
     main()
