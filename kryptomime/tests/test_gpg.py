@@ -4,7 +4,7 @@
 # GPG unit tests
 #
 # This file is part of kryptomime, a Python module for email kryptography.
-# Copyright © 2013 Thomas Tanner <tanner@gmx.net>
+# Copyright © 2013,2014 Thomas Tanner <tanner@gmx.net>
 #
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -23,6 +23,14 @@ from unittest import TestCase, main
 
 from .. import create_mail, GPGMIME, protect_mail
 import gnupg, email.mime.text
+
+"""
+TODO:
+exotic mails: 'multipart/encrypted' but single-part, text/plain but encrypted, 'multipart/mixed' by signed
+input mail as str
+all line endings
+default key =false or true&missing
+"""
 
 generate=False # whether to generate key on the fly instead default
 sender='foo@localhost'
@@ -44,6 +52,7 @@ def mktmp():
 
 def compare_mail(a,b):
     assert a.is_multipart() == b.is_multipart()
+    # todo headers
     if a.is_multipart():
         for i in range(len(a.get_payload())):
             ap = a.get_payload(i)
@@ -90,10 +99,29 @@ def tearDownModule():
     import os
     for tmp in keyrings+secrings: os.unlink(tmp)
 
-def test_selfie():
+def test_sign():
     id1 = GPGMIME(gpg1,default_key=(sender,passphrase))
-    assert id1.sign(msg)[0]
-    assert id1.encrypt(msgrev,toself=False,sign=False)[0]
+    def sub(inline):
+        sgn, result = id1.sign(msg,inline=inline,verify=True)
+        assert sgn
+        assert id1.verify(sgn)[0]
+        msg2, signed, results = id1.decrypt(sgn)
+        assert signed and msg2
+        compare_mail(prot,msg2)
+        return sgn
+    sub(False)
+    sgn = sub(True)
+    assert not sgn.is_multipart()
+    body = sgn.get_payload()
+    assert id1.without_signature(body)==prot.get_payload()
+
+def test_encrypt():
+    id1 = GPGMIME(gpg1,default_key=(sender,passphrase))
+    enc, results = id1.encrypt(msgrev,toself=False,sign=False)
+    assert enc
+    msg2, signed, results = id1.decrypt(enc)
+    assert not signed and msg2
+    compare_mail(msgrev,msg2)
 
 def test_unknown_sign():
     # bad sign
@@ -124,6 +152,12 @@ class UnilateralTest(TestCase):
 
     def test_raw(self):
         assert self.id1.analyze(msg) == (False,False)
+        raw, verified, result1 = self.id1.decrypt(msg)
+        verified2, result2 = self.id1.verify(msg)
+        assert raw and result1 and result2
+        assert not result1['encrypted'] and not (verified or result1['signed'] or result2['signed'])
+        assert not (result1['key_ids'] or result2['key_ids'])
+        compare_mail(msg,raw)
 
     def test_verify(self):
         assert self.enc and self.sgn
@@ -202,6 +236,15 @@ class BilateralTest(TestCase):
     def tearDownClass(cls):
         import os
         for tmp in cls.keyrings: os.unlink(tmp)
+
+    def test_keys(self):
+        id1 = self.id1
+        s = id1.find_key(sender)
+        r = id1.find_key(receiver)
+        assert s and r
+        k = id1.find_key([sender,receiver])
+        assert k[sender]==s and k[receiver]==r
+        assert id1.find_key('un@known') is None
 
     def encrypt(self,msg,sign,inline):
         id1, id2 = self.id1, self.id2
@@ -326,6 +369,18 @@ class BilateralTest(TestCase):
 
     def test_bad_encrypt_sign(self):
         self.bad_encrypt(True)
+
+    def test_file(self):
+        from six.moves import cStringIO
+        id1, id2 = self.id1, self.id2
+        secret = 'some\nsecret'
+        sgn = id1.sign_file(cStringIO(secret))
+        assert sgn
+        assert id2.verify_file(cStringIO(str(sgn)))
+        enc = id1.encrypt_file(cStringIO(secret),[receiver],sign=sender)
+        assert enc
+        result = id2.decrypt_file(cStringIO(str(enc)))
+        assert str(result) == secret
 
 if __name__ == '__main__':
     main()

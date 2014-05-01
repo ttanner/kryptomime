@@ -3,7 +3,7 @@
 # PGP/MIME (GnuPG) support
 #
 # This file is part of kryptomime, a Python module for email kryptography.
-# Copyright © 2013 Thomas Tanner <tanner@gmx.net>
+# Copyright © 2013,2014 Thomas Tanner <tanner@gmx.net>
 # partially inspired by the Mailman Secure List Server patch by 
 #  Stefan Schlott <stefan.schlott informatik.uni-ulm.de>
 #  Joost van Baal <joostvb-mailman-pgp-smime.mdcc.cx>
@@ -29,31 +29,31 @@ class PGPMIME(KryptoMIME):
         """find key (fingerprint) for email 'addr' or return None.
         If addr is a list or tuple, return a dict(addr:keyid).
         secret searches in the secrety keyring """
-        return NotImplementedError
+        raise NotImplementedError
 
     def sign_file(self, file, **kwargs):
-        return NotImplementedError
+        raise NotImplementedError
 
     def sign_str(self, data, **kwargs):
-        return NotImplementedError
+        raise NotImplementedError
 
     def verify_file(self, file, signature=None):
-        return NotImplementedError
+        raise NotImplementedError
 
     def verify_str(self, data, signature=None):
-        return NotImplementedError
+        raise NotImplementedError
 
     def encrypt_file(self, file, *recipients, **kwargs):
-        return NotImplementedError
+        raise NotImplementedError
 
     def encrypt_str(self, data, *recipients, **kwargs):
-        return NotImplementedError
+        raise NotImplementedError
 
     def decrypt_file(self, file, **kwargs):
-        return NotImplementedError
+        raise NotImplementedError
 
     def decrypt_str(self, data, **kwargs):
-        return NotImplementedError
+        raise NotImplementedError
 
     # WARNING: Be EXTREMLY CAREFUL with modifying the following code. It's very RFC-sensitive
 
@@ -148,6 +148,8 @@ class PGPMIME(KryptoMIME):
                     elif not payload:
                         # yes, including headers
                         payload = submsg.as_string()
+                        if submsg.is_multipart() and len(submsg.get_payload())==1:
+                            submsg = submsg.get_payload()[0]
                         _mail_transfer_content(submsg,rawmail)
                         if submsg.is_multipart():
                             rawmail.set_payload(None)
@@ -317,7 +319,7 @@ class PGPMIME(KryptoMIME):
             results['encrypted'] = True
             if not 'default_key' in kwargs:
                 if not self.default_key: return False, results # key required
-                kwargs['default_key'] = True
+                kwargs['default_key'] = sender
             elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
                 return False, results # key required
             ciphertext = self._fix_quoting(ciphertext)
@@ -372,7 +374,15 @@ class PGPMIME(KryptoMIME):
             results['encrypted'] = True
             if not 'default_key' in kwargs:
                 if not self.default_key: return None, False, results # key required
-                kwargs['default_key'] = True
+                tos = mail.get_all('to', [])
+                ccs = mail.get_all('cc', [])
+                receiver = None
+                for to in email.utils.getaddresses(tos + ccs):
+                    receiver = self.find_key(email.utils.formataddr(to))
+                    if receiver: break
+                if not receiver:
+                    return None, False, results # cannot decrypt
+                kwargs['default_key'] = receiver
             elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
                 return None, False, results # key required
             ciphertext = self._fix_quoting(ciphertext)
@@ -414,10 +424,10 @@ class PGPMIME(KryptoMIME):
         if not isinstance(mail,(Message,str)): return None, None
         mail = protect_mail(mail,ending='\r\n',sevenbit=True) # fix line endings + 7bit
         if not 'default_key' in kwargs:
-            if not self.default_key: return None, None # key required
             import email.utils
             sender = mail.get('from', [])
-            sender = email.utils.parseaddr(sender)[1]
+            sender = self.find_key(email.utils.parseaddr(sender)[1],secret=True)
+            if not sender: return None, None # key required
             kwargs['default_key'] = sender
         elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
             return None, None # key required
@@ -485,16 +495,20 @@ class PGPMIME(KryptoMIME):
         from .mail import _mail_addreplace_header
         if type(mail)==str: mail = Parser().parsestr(mail)
         elif not isinstance(mail,Message): return None, None
-        sender = mail.get('from', [])
-        sender = email.utils.parseaddr(sender)[1]
         tos = mail.get_all('to', [])
         ccs = mail.get_all('cc', [])
-        recipients = [email.utils.formataddr(to) for to in email.utils.getaddresses(tos + ccs)]
-        if toself and not sender in recipients: recipients.append(sender)
+        recipients = [self.find_key(email.utils.formataddr(to)) for to in email.utils.getaddresses(tos + ccs)]
+        if None in recipients: return None, None # key required
+        if toself or sign:
+            sender = email.utils.parseaddr(mail.get('from', []))[1]
+            senderkey = self.find_key(sender,secret=True)
+            if not senderkey: return None, None # key required
+            if toself:
+                if not senderkey in recipients: recipients.append(senderkey)
         if sign:
             if not 'default_key' in kwargs:
-                if not self.default_key: return None, None # key required
-                kwargs['default_key'] = sender
+                #if not self.default_key: return None, None # key required
+                kwargs['default_key'] = senderkey
             elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
                 return None, None # key required
         plaintext, submsg = self._plaintext(mail, inline, protect=False)
@@ -506,10 +520,11 @@ class PGPMIME(KryptoMIME):
         except: result = None
         if not result: return None, result
         ciphertext = str(result)
-        if verify:
+        if verify and toself:
             del kwargs['sign']
             del kwargs['armor']
-            if not 'default_key' in kwargs: kwargs['default_key'] = sender
+            if not 'default_key' in kwargs:
+                kwargs['default_key'] = senderkey
             vresult = self.decrypt_str(ciphertext, **kwargs)
             if not vresult.ok or (sign and not vresult.valid): return None, result
         # Compile encrypted message
@@ -578,8 +593,8 @@ class GPGMIME(PGPMIME):
             del kwargs['default_key']
             return kwargs
         if key!=True:
-            kwargs['default_key'] = key = self.find_key(key,secret=True)
-            assert key, "sender key missing"
+            key = self.find_key(key,secret=True) or key
+            kwargs['default_key'] = key
         else: assert self.default_key, "default key missing"
         if self.default_key:
             if type(self.default_key) in (tuple,list):
@@ -634,7 +649,8 @@ class GPGMIME(PGPMIME):
             f.close()
         return result
 
-    def without_signature(self, data):
+    @staticmethod
+    def without_signature(data):
         "remove signature from string, if present"
         if len(data)<=10: return data # no signature
         firstline = data.splitlines()[0]
@@ -646,7 +662,7 @@ class GPGMIME(PGPMIME):
             text += line
         return text
 
-    def pubkey_attachment(self,key):
+    def pubkey_attachment(self,key): # pragma: no cover
         "returns an attachment with the specified public key"
         from email.mime.text import MIMEText
         key = self.find_key(key) or key

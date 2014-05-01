@@ -3,7 +3,7 @@
 # EMail kryptography support
 #
 # This file is part of kryptomime, a Python module for email kryptography.
-# Copyright © 2013 Thomas Tanner <tanner@gmx.net>
+# Copyright © 2013,2014 Thomas Tanner <tanner@gmx.net>
 # 
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free

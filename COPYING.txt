@@ -1,7 +1,7 @@
 This file is part of kryptomime, a Python module for email kryptography.
 
 Licensed GNU GENERAL PUBLIC LICENSE 3+.
-Copyright © 2013 Thomas Tanner <tanner@gmx.net>
+Copyright © 2013,2014 Thomas Tanner <tanner@gmx.net>
 All rights reserved.
 
                     GNU GENERAL PUBLIC LICENSE

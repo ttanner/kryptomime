@@ -3,7 +3,7 @@
 # TLS IMAP and SMTP support
 #
 # This file is part of kryptomime, a Python module for email kryptography.
-# Copyright © 2013 Thomas Tanner <tanner@gmx.net>
+# Copyright © 2013,2014 Thomas Tanner <tanner@gmx.net>
 # 
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -60,8 +60,9 @@ class IMAP4_TLS(imaplib.IMAP4_SSL):
         :returns: A bar formatted string
         """
 
+        import ssl
         if not sslargs.get('ssl_version'):
-            sslargs['cert_reqs'] = ssl.PROTOCOL_TLSv1
+            sslargs['ssl_version'] = ssl.PROTOCOL_TLSv1
         if not sslargs.get('cert_reqs'):
             sslargs['cert_reqs'] = ssl.CERT_REQUIRED if sslargs.get('ca_certs') else ssl.CERT_NONE
         self.sslargs = sslargs
@@ -75,7 +76,7 @@ class IMAP4_TLS(imaplib.IMAP4_SSL):
         self.sslobj = ssl.wrap_socket(self.sock, self.keyfile, self.certfile, **self.sslargs)
         self.file = self.sslobj.makefile('rb')
 
-class SMTP_TLS(smtplib.SMTP_SSL):
+class SMTP_TLS(smtplib.SMTP):
     """This is a subclass derived from SMTP that connects over an SSL encrypted
     socket (to use this class you need a socket module that was compiled with SSL
     support). If host is not specified, '' (the local host) is used. If port is
@@ -86,7 +87,7 @@ class SMTP_TLS(smtplib.SMTP_SSL):
     In addition the starttls command accepts extra SSL parameters.
     """
 
-    def starttls(self, **sslargs):
+    def starttls(self, keyfile=None, certfile=None, **sslargs):
         """Puts the connection to the SMTP server into TLS mode.
 
         If there has been no previous EHLO or HELO command this session, this
@@ -113,7 +114,7 @@ class SMTP_TLS(smtplib.SMTP_SSL):
         (resp, reply) = self.docmd("STARTTLS")
         if resp == 220:
             if not sslargs.get('ssl_version'):
-                sslargs['cert_reqs'] = ssl.PROTOCOL_TLSv1
+                sslargs['ssl_version'] = ssl.PROTOCOL_TLSv1
             if not sslargs.get('cert_reqs'):
                 sslargs['cert_reqs'] = ssl.CERT_REQUIRED if sslargs.get('ca_certs') else ssl.CERT_NONE
             self.sock = ssl.wrap_socket(self.sock, keyfile, certfile, **sslargs)
