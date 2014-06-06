@@ -30,7 +30,7 @@ setuptools.setup(
     long_description=open('README.rst').read(),
     license="GPLv3+",
 
-    version='0.2.0',
+    version='0.2.1',
     author=__author__,
     author_email=__contact__,
     maintainer=__author__,
@@ -44,13 +44,13 @@ setuptools.setup(
     test_suite='kryptomime.tests',
     tests_require=['nose','coverage'],
 
-    install_requires=['gnupg>=1.2.5','six>=1.4.1'],
+    install_requires=['gnupg>=1.2.6','six>=1.4.1'],
     extras_require={'docs': ["Sphinx>=1.1", "repoze.sphinx"]},
 
     platforms="Linux, BSD, OSX, Windows",
     download_url="https://github.com/ttanner/kryptomime/archive/master.zip",
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Programming Language :: Python",

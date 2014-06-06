@@ -5,19 +5,9 @@ python:
   - "2.6"
   - "2.7"
   - "3.3"
+  - "3.4"
 install:
-  - git clone https://github.com/isislovecruft/python-gnupg.git
-  - cd python-gnupg
-  - git config --add remote.origin.fetch "+refs/pull/*/head:refs/remotes/origin/pr/*"
-  - git config user.email "foo@bar.com"
-  - git config user.name "Foo"
-  - git fetch origin
-  - git merge --log -m "" origin/pr/32
-  - git merge --log -m "" origin/pr/33
-  - git merge --log -m "" origin/pr/43
-  - git merge --log -m "" origin/pr/45
-  - python setup.py install
-  - cd ..
+  - pip install gnupg
   - pip install psutil
   - pip install nose
   - pip install coverage
