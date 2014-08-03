@@ -19,9 +19,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
-from unittest import TestCase, main
+from pytest import fixture
 
-from .. import create_mail, GPGMIME, protect_mail
+from kryptomime import create_mail, GPGMIME, protect_mail
+from kryptomime.pgp import find_gnupg_key
+
 import gnupg, email.mime.text
 
 """
@@ -32,7 +34,6 @@ all line endings
 default key =false or true&missing
 """
 
-generate=False # whether to generate key on the fly instead default
 sender='foo@localhost'
 passphrase='mysecret'
 receiver='bar@localhost'
@@ -61,11 +62,11 @@ def compare_mail(a,b):
     else:
         assert a.get_payload() == b.get_payload()
 
-def setUpModule():
-    global gpg1, gpg2, pubkey1, pubkey2, keyrings, secrings
+@fixture(scope='module')
+def keys(request):
     import os
-    from ..pgp import find_gnupg_key
-    verbose = False
+    generate = request.config.getoption('generate')
+    verbose = request.config.getoption('gpglog')
     if verbose: gnupg._logger.create_logger(10)
     if generate:
         keyrings = [mktmp() for i in range(2)]
@@ -93,19 +94,25 @@ def setUpModule():
         key2 = find_gnupg_key(gpg2,receiver)
     pubkey1= gpg1.export_keys(key1)
     pubkey2= gpg2.export_keys(key2)
+    def fin():
+        for tmp in keyrings+secrings: os.unlink(tmp)
+    if generate: request.addfinalizer(fin)
+    return {'gpg1':gpg1, 'gpg2':gpg2, 'pubkey1':pubkey1, 'pubkey2':pubkey2, 'secrings':secrings}
 
-def tearDownModule():
-    if not generate: return
-    import os
-    for tmp in keyrings+secrings: os.unlink(tmp)
+@fixture(scope='module')
+def gpgsender(keys):
+    return GPGMIME(keys['gpg1'],default_key=(sender,passphrase))
 
-def test_sign():
-    id1 = GPGMIME(gpg1,default_key=(sender,passphrase))
+@fixture(scope='module')
+def gpgreceiver(keys):
+    return GPGMIME(keys['gpg2'],default_key=receiver)
+
+def test_sign(gpgsender):
     def sub(inline):
-        sgn, result = id1.sign(msg,inline=inline,verify=True)
+        sgn, result = gpgsender.sign(msg,inline=inline,verify=True)
         assert sgn
-        assert id1.verify(sgn)[0]
-        msg2, signed, results = id1.decrypt(sgn)
+        assert gpgsender.verify(sgn)[0]
+        msg2, signed, results = gpgsender.decrypt(sgn)
         assert signed and msg2
         compare_mail(prot,msg2)
         return sgn
@@ -113,91 +120,87 @@ def test_sign():
     sgn = sub(True)
     assert not sgn.is_multipart()
     body = sgn.get_payload()
-    assert id1.without_signature(body)==prot.get_payload()
+    assert gpgsender.without_signature(body)==prot.get_payload()
 
-def test_encrypt():
-    id1 = GPGMIME(gpg1,default_key=(sender,passphrase))
-    enc, results = id1.encrypt(msgrev,toself=False,sign=False)
+def test_encrypt(gpgsender):
+    enc, results = gpgsender.encrypt(msgrev,toself=False,sign=False)
     assert enc
-    msg2, signed, results = id1.decrypt(enc)
+    msg2, signed, results = gpgsender.decrypt(enc)
     assert not signed and msg2
     compare_mail(msgrev,msg2)
 
-def test_unknown_sign():
+def test_unknown_sign(gpgreceiver):
     # bad sign
-    id2 = GPGMIME(gpg2,default_key=receiver)
-    assert id2.sign(msg)[0] is None # sender key missing - cannot sign
+    assert gpgreceiver.sign(msg)[0] is None # sender key missing - cannot sign
     
-def test_unknown_encrypt():
+def test_unknown_encrypt(gpgsender):
     # bad encrypt
-    id1 = GPGMIME(gpg1,default_key=(sender,passphrase))
-    assert id1.encrypt(msg)[0] is None # receiver key missing - cannot encrypt
+    assert gpgsender.encrypt(msg)[0] is None # receiver key missing - cannot encrypt
 
-class UnilateralTest(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.keyring = mktmp()
-        cls.gpg = gnupg.GPG(keyring=cls.keyring,secring=secrings[0])
-        cls.gpg.import_keys(pubkey1)
-        cls.gpg.import_keys(pubkey2) # sender knows receiver pubkey
-        cls.id1 = GPGMIME(cls.gpg,default_key=(sender,passphrase))
-        cls.id2 = GPGMIME(gpg2,default_key=receiver)
-        cls.sgn = cls.id1.sign(msg)[0]
-        cls.enc = cls.id1.encrypt(msg,toself=False,sign=False)[0]
-
-    @classmethod
-    def tearDownClass(cls):
+@fixture(scope='module')
+def unilateral(request,keys):
+    keyring = mktmp()
+    gpg = gnupg.GPG(keyring=keyring,secring=keys['secrings'][0])
+    gpg.import_keys(keys['pubkey1'])
+    gpg.import_keys(keys['pubkey2']) # sender knows receiver pubkey
+    id = GPGMIME(gpg,default_key=(sender,passphrase))
+    sgn = id.sign(msg)[0]
+    enc = id.encrypt(msg,toself=False,sign=False)[0]
+    def fin():
         import os
-        os.unlink(cls.keyring)
+        os.unlink(keyring)
+    request.addfinalizer(fin)
+    return {'id':id,'sgn':sgn,'enc':enc}
 
-    def test_raw(self):
-        assert self.id1.analyze(msg) == (False,False)
-        raw, verified, result1 = self.id1.decrypt(msg)
-        verified2, result2 = self.id1.verify(msg)
+class TestUnilateral:
+
+    def test_raw(self,unilateral):
+        id1 = unilateral['id']
+        assert id1.analyze(msg) == (False,False)
+        raw, verified, result1 = id1.decrypt(msg)
+        verified2, result2 = id1.verify(msg)
         assert raw and result1 and result2
         assert not result1['encrypted'] and not (verified or result1['signed'] or result2['signed'])
         assert not (result1['key_ids'] or result2['key_ids'])
         compare_mail(msg,raw)
 
-    def test_verify(self):
-        assert self.enc and self.sgn
-        assert self.id1.sign(msg,verify=True)[0]
-        assert self.id1.encrypt(msg,sign=False,verify=True)[0]
+    def test_verify(self,unilateral):
+        id1, sgn, enc = unilateral['id'], unilateral['sgn'], unilateral['enc']
+        assert enc and sgn
+        assert id1.sign(msg,verify=True)[0]
+        assert id1.encrypt(msg,sign=False,verify=True)[0]
 
-    def test_sender_signed(self):
+    def test_sender_signed(self,unilateral,gpgreceiver):
         # good self sign
-        id1, id2 = self.id1, self.id2
-        sgn = self.sgn
+        id1, id2, sgn = unilateral['id'], gpgreceiver, unilateral['sgn']
         raw, verified, result1 = id1.decrypt(sgn)
         verified2, result2 = id1.verify(sgn)
         assert raw and result1 and result2
         assert not result1['encrypted'] and verified and result1['signed'] and result2['signed'] and result1['key_ids']
         assert result1['key_ids']==result2['key_ids']
 
-    def test_sender_signed_nl(self):
+    def test_sender_signed_nl(self,unilateral,gpgreceiver):
         # good self sign
-        id1, id2 = self.id1, self.id2
-        sgn = protect_mail(self.sgn,ending='\n')
+        id1, id2, sgn = unilateral['id'], gpgreceiver, unilateral['sgn']
+        sgn = protect_mail(sgn,ending='\n')
         raw, verified, result1 = id1.decrypt(sgn,strict=False)
         verified2, result2 = id1.verify(sgn,strict=False)
         assert raw and result1 and result2
         assert not result1['encrypted'] and verified and result1['signed'] and result2['signed'] and result1['key_ids']
         assert result1['key_ids']==result2['key_ids']
 
-    def test_sender_encrypted(self):
+    def test_sender_encrypted(self,unilateral,gpgreceiver):
         # bad self decrypt
-        id1, id2 = self.id1, self.id2
-        sgn, enc = self.sgn, self.enc
+        id1, id2, enc = unilateral['id'], gpgreceiver, unilateral['enc']
         raw, verified, result1 = id1.decrypt(enc)
         verified2, result2 = id1.verify(enc)
         assert not raw and result1 and result2
         assert result1['encrypted'] and not (verified or result1['signed'] or result2['signed'])
         assert not (result1['key_ids'] or result2['key_ids'])
 
-    def test_receiver_signed(self):
+    def test_receiver_signed(self,unilateral,gpgreceiver):
         # bad sign
-        id1, id2 = self.id1, self.id2
-        sgn, enc = self.sgn, self.enc
+        id1, id2, sgn = unilateral['id'], gpgreceiver, unilateral['sgn']
         # receiver does not know sender, cannot verify, but can decrypt
         raw, verified, result1 = id2.decrypt(sgn)
         verified2, result2 = id2.verify(sgn)
@@ -207,10 +210,9 @@ class UnilateralTest(TestCase):
         assert not (result1['key_ids'] or result2['key_ids'])
         compare_mail(prot,raw)
 
-    def test_receiver_encrypted(self):
+    def test_receiver_encrypted(self,unilateral,gpgreceiver):
         # bad encrypt
-        id1, id2 = self.id1, self.id2
-        sgn, enc = self.sgn, self.enc
+        id1, id2, enc = unilateral['id'], gpgreceiver, unilateral['enc']
         raw, verified, result1 = id2.decrypt(enc)
         verified2, result2 = id2.verify(enc)
         assert raw and result1 and result2
@@ -218,27 +220,27 @@ class UnilateralTest(TestCase):
         assert not (result1['key_ids'] or result2['key_ids'])
         compare_mail(msg,raw)
 
-class BilateralTest(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.keyrings = [mktmp() for i in range(2)]
-        cls.gpg1 = gnupg.GPG(keyring=cls.keyrings[0],secring=secrings[0])
-        cls.gpg2 = gnupg.GPG(keyring=cls.keyrings[1],secring=secrings[1])
-        cls.gpg1.import_keys(pubkey1)
-        cls.gpg1.import_keys(pubkey2) # sender knows receiver pubkey
-        cls.gpg2.import_keys(pubkey1)
-        cls.gpg2.import_keys(pubkey2)
-        cls.id1 = GPGMIME(cls.gpg1,default_key=(sender,passphrase))
-        cls.id2 = GPGMIME(cls.gpg2,default_key=receiver)
-        cls.id2u = GPGMIME(gpg2,default_key=receiver) # without pubkey1
-
-    @classmethod
-    def tearDownClass(cls):
+@fixture(scope='module')
+def bilateral(request,keys):
+    keyrings = [mktmp() for i in range(2)]
+    gpg1 = gnupg.GPG(keyring=keyrings[0],secring=keys['secrings'][0])
+    gpg2 = gnupg.GPG(keyring=keyrings[1],secring=keys['secrings'][1])
+    gpg1.import_keys(keys['pubkey1'])
+    gpg1.import_keys(keys['pubkey2']) # sender knows receiver pubkey
+    gpg2.import_keys(keys['pubkey1'])
+    gpg2.import_keys(keys['pubkey2'])
+    id1 = GPGMIME(gpg1,default_key=(sender,passphrase))
+    id2 = GPGMIME(gpg2,default_key=receiver)
+    def fin():
         import os
-        for tmp in cls.keyrings: os.unlink(tmp)
+        for tmp in keyrings: os.unlink(tmp)
+    request.addfinalizer(fin)
+    return {'id1':id1,'id2':id2,'gpg1':gpg1}
 
-    def test_keys(self):
-        id1 = self.id1
+class TestBilateral:
+
+    def test_keys(self,bilateral):
+        id1 = bilateral['id1']
         s = id1.find_key(sender)
         r = id1.find_key(receiver)
         assert s and r
@@ -246,8 +248,8 @@ class BilateralTest(TestCase):
         assert k[sender]==s and k[receiver]==r
         assert id1.find_key('un@known') is None
 
-    def encrypt(self,msg,sign,inline):
-        id1, id2 = self.id1, self.id2
+    def encrypt(self,ids,msg,sign,inline):
+        id1, id2 = ids['id1'], ids['id2']
         enc,_ = id1.encrypt(msg,sign=sign,inline=inline)
         assert enc and id2.analyze(enc) == (True,None)
         mail, verified, result1 = id2.decrypt(enc)
@@ -257,8 +259,8 @@ class BilateralTest(TestCase):
         assert result1['key_ids']==result2['key_ids']
         compare_mail(mail,msg)
 
-    def sign(self,msg,inline):
-        id1, id2 = self.id1, self.id2
+    def sign(self,ids,msg,inline):
+        id1, id2 = ids['id1'], ids['id2']
         prot = protect_mail(msg,ending='\r\n')
         sgn,_ = id1.sign(msg,inline=inline)
         assert sgn and id2.analyze(sgn) == (False,True)
@@ -272,67 +274,67 @@ class BilateralTest(TestCase):
         assert result1['key_ids']==result2['key_ids']
         compare_mail(rawmail,prot)
 
-    def test_sign(self):
-        self.sign(msg, inline=False)
+    def test_sign(self,bilateral):
+        self.sign(bilateral, msg, inline=False)
 
-    def test_sign_attach(self):
-        self.sign(msgatt, inline=False)
+    def test_sign_attach(self,bilateral):
+        self.sign(bilateral, msgatt, inline=False)
 
-    def test_sign_inline(self):
-        self.sign(msg, inline=True)
+    def test_sign_inline(self,bilateral):
+        self.sign(bilateral, msg, inline=True)
 
-    def test_sign_inline_attach(self):
-        self.sign(msgatt, inline=True)
+    def test_sign_inline_attach(self,bilateral):
+        self.sign(bilateral, msgatt, inline=True)
 
-    def test_encrypt(self):
-        self.encrypt(msg, sign=False, inline=False)
+    def test_encrypt(self,bilateral):
+        self.encrypt(bilateral, msg, sign=False, inline=False)
 
-    def test_encrypt_attach(self):
-        self.encrypt(msgatt, sign=False, inline=False)
+    def test_encrypt_attach(self,bilateral):
+        self.encrypt(bilateral, msgatt, sign=False, inline=False)
 
-    def test_encrypt_inline(self):
-        self.encrypt(msg, sign=False, inline=True)
+    def test_encrypt_inline(self,bilateral):
+        self.encrypt(bilateral, msg, sign=False, inline=True)
 
-    def test_encrypt_sign(self):
-        self.encrypt(msg, sign=True, inline=False)
+    def test_encrypt_sign(self,bilateral):
+        self.encrypt(bilateral, msg, sign=True, inline=False)
 
-    def test_encrypt_sign_attach(self):
-        self.encrypt(msgatt, sign=True, inline=False)
+    def test_encrypt_sign_attach(self,bilateral):
+        self.encrypt(bilateral, msgatt, sign=True, inline=False)
 
-    def test_encrypt_sign_inline(self):
-        self.encrypt(msg, sign=True, inline=True)
+    def test_encrypt_sign_inline(self,bilateral):
+        self.encrypt(bilateral, msg, sign=True, inline=True)
 
-    def test_no_defkey(self):
+    def test_no_defkey(self,bilateral):
         # missing defkekf, cannot sign
-        id1 = GPGMIME(self.gpg1)
+        id1 = GPGMIME(bilateral['gpg1'])
         assert id1.sign(msg)[0] is None
         assert id1.encrypt(msg,sign=True)[0] is None
         # no receiver key, cannot decrypt
-        enc = self.id2.encrypt(msgrev)[0]
+        enc = bilateral['id2'].encrypt(msgrev)[0]
         assert enc and id1.decrypt(enc)[0] is None
 
-    def test_bad_passphrase(self):
+    def test_bad_passphrase(self,bilateral):
         # bad sender passphrase, cannot sign
-        id1 = GPGMIME(self.gpg1,default_key=(sender,'wrong'))
+        id1 = GPGMIME(bilateral['gpg1'],default_key=(sender,'wrong'))
         assert id1.sign(msg)[0] is None
         assert id1.encrypt(msg,sign=True)[0] is None
         # bad receiver passphrase, cannot decrypt
-        enc = self.id2.encrypt(msgrev)[0]
+        enc = bilateral['id2'].encrypt(msgrev)[0]
         assert enc and id1.decrypt(enc)[0] is None
 
-    def test_bad_defkey(self):
+    def test_bad_defkey(self,bilateral):
         # bad sender passphrase, cannot sign
-        id1 = GPGMIME(self.gpg1,default_key=receiver)
+        id1 = GPGMIME(bilateral['gpg1'],default_key=receiver)
         assert id1.sign(msgrev)[0] is None
         assert id1.encrypt(msgrev,sign=True)[0] is None
         # bad receiver key, cannot decrypt
-        enc = self.id2.encrypt(msgrev,toself=False)[0]
+        enc = bilateral['id2'].encrypt(msgrev,toself=False)[0]
         assert enc
         assert id1.decrypt(enc)[0] is None
 
-    def bad_sign(self,msg,encrypt):
+    def bad_sign(self,ids,receiver,msg,encrypt):
         # id1 signs, but id2 doesn't know id1
-        id1, id2 = self.id1, self.id2u
+        id1, id2 = ids['id1'], receiver
         prot = protect_mail(msg,ending='\r\n')
         if encrypt: out,_ = id1.encrypt(msg,sign=True)
         else: out,_ = id1.sign(msg)
@@ -346,15 +348,15 @@ class BilateralTest(TestCase):
         assert result1['signed'] and result2['signed']
         assert not result1['key_ids'] and not result2['key_ids']
 
-    def test_bad_sign(self):
-        self.bad_sign(msg, False)
+    def test_bad_sign(self,bilateral,gpgreceiver):
+        self.bad_sign(bilateral,gpgreceiver,msg, False)
 
-    def test_bad_sign_encrypt(self):
-        self.bad_sign(msg, True)
+    def test_bad_sign_encrypt(self,bilateral,gpgreceiver):
+        self.bad_sign(bilateral,gpgreceiver, msg, True)
 
-    def bad_encrypt(self,sign):
+    def bad_encrypt(self,ids,receiver,sign):
         # id1 encrypts for id1, but id2 can't decrypt id1
-        id1, id2 = self.id1, self.id2u
+        id1, id2 = ids['id1'], receiver
         enc,_ = id1.encrypt(msgself,sign=sign)
         assert enc and id2.analyze(enc) == (True,None)
         mail, verified, result1 = id2.decrypt(enc)
@@ -364,15 +366,15 @@ class BilateralTest(TestCase):
         assert not result1['key_ids'] and not result2['key_ids']
         assert not result1['signed'] and not result2['signed']
 
-    def test_bad_encrypt(self):
-        self.bad_encrypt(False)
+    def test_bad_encrypt(self,bilateral,gpgreceiver):
+        self.bad_encrypt(bilateral,gpgreceiver,False)
 
-    def test_bad_encrypt_sign(self):
-        self.bad_encrypt(True)
+    def test_bad_encrypt_sign(self,bilateral,gpgreceiver):
+        self.bad_encrypt(bilateral,gpgreceiver,True)
 
-    def test_file(self):
+    def test_file(self,bilateral):
         from io import BytesIO
-        id1, id2 = self.id1, self.id2
+        id1, id2 = bilateral['id1'], bilateral['id2']
         secret = 'some\nsecret'.encode('ascii')
         sgn = id1.sign_file(BytesIO(secret))
         assert sgn
@@ -381,6 +383,3 @@ class BilateralTest(TestCase):
         assert enc
         result = id2.decrypt_file(BytesIO(str(enc).encode('ascii')))
         assert str(result).encode('ascii') == secret
-
-if __name__ == '__main__':
-    main()

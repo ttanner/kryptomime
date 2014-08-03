@@ -19,9 +19,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
-from unittest import TestCase, main
-
-from ..mail import protect_mail
+from kryptomime.mail import protect_mail
 
 def test_protect():
     #> From foo
@@ -49,6 +47,3 @@ line2
 '''
     prot = protect_mail(msg,ending='\n',sevenbit=True)
     assert prot.as_string() == msg
-
-if __name__ == '__main__':
-    main()
