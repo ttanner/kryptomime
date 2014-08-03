@@ -64,7 +64,7 @@ setuptools.setup(
     tests_require=['pytest','coverage'],
     cmdclass = {'test': PyTest},
 
-    install_requires=['gnupg>=1.2.6','six>=1.4.1'],
+    install_requires=['gnupg==1.2.6','six>=1.4.1'],
     extras_require={'docs': ["Sphinx>=1.1", "repoze.sphinx"]},
 
     platforms="Linux, BSD, OSX, Windows",

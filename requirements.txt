@@ -38,4 +38,4 @@
 #
 # And, this one is actually used in the gnupg module code:
 #
-gnupg>=1.2.6
+gnupg==1.2.6
