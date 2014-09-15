@@ -114,15 +114,15 @@ def gpgreceiver(keys):
 
 def print_mail(m):
     from kryptomime.mail import ProtectedMessage
-    print 'main', repr(m.ending) if isinstance(m,ProtectedMessage) else ''
-    print repr(m.as_string())
+    print ('main', repr(m.ending) if isinstance(m,ProtectedMessage) else '')
+    print (repr(m.as_string()))
     if m.is_multipart():
         for i, sub in enumerate(m.get_payload()):
-            print 'part',i, repr(sub.ending) if isinstance(sub,ProtectedMessage) else ''
-            print repr(sub.as_string())
-            print repr(sub.get_payload())
+            print ('part',i, repr(sub.ending) if isinstance(sub,ProtectedMessage) else '')
+            print (repr(sub.as_string()))
+            print (repr(sub.get_payload()))
     else:
-        print repr(m.get_payload())
+        print (repr(m.get_payload()))
 
 def test_sign(gpgsender):
     # protect = use protected CRLF message

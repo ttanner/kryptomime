@@ -67,7 +67,6 @@ class PGPMIME(KryptoMIME):
     @staticmethod
     def _plaintext(mail, inline = False, protect=False):
         # Extract / generate plaintext
-        from email.parser import HeaderParser
         import copy
         multipart = mail.is_multipart()
         if not multipart and inline: return mail.get_payload(), None
@@ -86,7 +85,8 @@ class PGPMIME(KryptoMIME):
         ciphertext = None
         is_pgpmime = False
         # Check: Is inline pgp?
-        if type(mail)==str: mail = Parser().parsestr(mail)
+        from .mail import protect_mail
+        if type(mail)==str: mail = protect_mail(mail,ending=None)
         if mail.get_content_type()=='application/pgp' or mail.get_param('x-action')=='pgp-encrypted':
             ciphertext = mail.get_payload()
             is_pgpmime = False
@@ -131,7 +131,6 @@ class PGPMIME(KryptoMIME):
 
     @staticmethod
     def _signature(mail):
-        from email.parser import HeaderParser, Parser
         from .mail import as_protected, _mail_raw, _mail_transfer_content, protect_mail
         from sys import version_info as vs
         payload = ''
@@ -204,18 +203,18 @@ class PGPMIME(KryptoMIME):
                 if line.rstrip()=='-----BEGIN PGP SIGNATURE-----': break
                 text += line
             signatures = [None]
-            rawmail = HeaderParser().parsestr(mail.as_string())
-            rawmail.del_param("x-action")
-            rawmail.set_payload(text.rstrip()) # remove last line ending
+            mail.del_param("x-action")
+            mail.set_payload(text.rstrip()) # remove last line ending
+            rawmail = mail
         return payload, signatures, rawmail
 
     @staticmethod
     def _decoded(mail,plaintext,is_pgpmime):
         # Check transfer type
-        from email.parser import HeaderParser, Parser
         from .mail import _mail_addreplace_header, _mail_transfer_content
-        mail = HeaderParser().parsestr(mail.as_string())
-        tmpmsg = Parser().parsestr(plaintext)
+        from .mail import protect_mail
+        mail = protect_mail(mail,ending=None)
+        tmpmsg = protect_mail(plaintext,ending=None)
         if mail.get_content_type()=='application/pgp': mail.set_type("text/plain")
         mail.del_param("x-action")
         if tmpmsg.is_multipart() and len(tmpmsg.get_payload())==1:
@@ -239,9 +238,9 @@ class PGPMIME(KryptoMIME):
         :returns: Whether the email is encrypted and whether it is signed (if it is not encrypted).
         :rtype: (bool,bool/None)
         """
-        from email.parser import Parser
         from email.message import Message
-        if type(mail)==str: mail = Parser().parsestr(mail)
+        from .mail import protect_mail
+        if type(mail)==str: mail = protect_mail(mail,ending=None)
         elif not isinstance(mail,Message): return False, False
         ciphertext, is_pgpmime = self._ciphertext(mail)
         if not ciphertext is None: return True, None
@@ -255,9 +254,9 @@ class PGPMIME(KryptoMIME):
         :returns: An email without signature and whether the input was signed
         :rtype: (Message,bool)
         """
-        from email.parser import Parser
         from email.message import Message
-        if type(mail)==str: mail = Parser().parsestr(mail)
+        from .mail import protect_mail
+        if type(mail)==str: mail = protect_mail(mail,ending=None)
         elif not isinstance(mail,Message): return None, False
         payload, signatures, rawmail = self._signature(mail)
         return rawmail, len(signatures)>0
@@ -310,10 +309,9 @@ class PGPMIME(KryptoMIME):
         """
         results = {'encrypted':False,'decryption':None,'signed':False,'key_ids':[],'results':[]}
         # possible encryptions: nothing,only signed, encrypted+signed, encrypted after signed 
-        from email.parser import Parser
         from email.message import Message
-        from .mail import protect_mail
         import email.utils
+        from .mail import protect_mail
         if type(mail)==str: mail = protect_mail(mail,ending=None)
         elif not isinstance(mail,Message): return False, results
         sender = mail.get('from', [])
@@ -366,7 +364,6 @@ class PGPMIME(KryptoMIME):
         """
         results = {'encrypted':False,'decryption':None,'signed':False,'key_ids':[],'results':[]}
         # possible encryptions: nothing,only signed, encrypted+signed, encrypted after signed 
-        from email.parser import Parser
         from email.message import Message
         from .mail import protect_mail
         import email.utils
@@ -424,7 +421,6 @@ class PGPMIME(KryptoMIME):
         :rtype: (Message,dict)
         """
         from email.message import Message
-        from email.parser import HeaderParser, Parser
         from .mail import protect_mail
         if not isinstance(mail,(Message,str)): return None, None
         mail = protect_mail(mail,ending='\r\n',sevenbit=True) # fix line endings + 7bit RFC2822
@@ -496,7 +492,6 @@ class PGPMIME(KryptoMIME):
         """
         import email.utils
         from email.message import Message
-        from email.parser import HeaderParser, Parser
         from .mail import _mail_addreplace_header, protect_mail
         if type(mail)==str: mail = protect_mail(mail,ending=None)
         elif not isinstance(mail,Message): return None, None
@@ -533,7 +528,7 @@ class PGPMIME(KryptoMIME):
             vresult = self.decrypt_str(ciphertext, **kwargs)
             if not vresult.ok or (sign and not vresult.valid): return None, result
         # Compile encrypted message
-        encmail = HeaderParser().parsestr(mail.as_string())
+        encmail = protect_mail(mail,ending=None)
         _mail_addreplace_header(encmail,'Content-Transfer-Encoding','7bit')
         if not mail.is_multipart() and inline:
             encmail.set_payload(ciphertext)
