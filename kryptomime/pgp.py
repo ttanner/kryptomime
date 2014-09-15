@@ -132,14 +132,16 @@ class PGPMIME(KryptoMIME):
     @staticmethod
     def _signature(mail):
         from email.parser import HeaderParser, Parser
-        from .mail import as_protected, _mail_raw, _mail_transfer_content
+        from .mail import as_protected, _mail_raw, _mail_transfer_content, protect_mail
+        from sys import version_info as vs
         payload = ''
         signatures = []
         rawmail = mail
         mail = as_protected(mail)
+        fix_nl = (vs[0]==2 and vs[1]*10+vs[2]<77) or (vs[0]==3 and vs[1]*10+vs[2]<35)
         if mail.is_multipart():
             rawmail = as_protected(mail,headersonly=True)
-            rawmail.epilogue='' # ensure final newline, workaround for http://bugs.python.org/issue14983
+            if fix_nl: rawmail.epilogue='' # ensure final newline, workaround for http://bugs.python.org/issue14983
             if mail.get_content_type()=='multipart/signed' and mail.get_param('protocol')=='application/pgp-signature':
                 # handle detached signatures, these look like:
                 for submsg in mail.get_payload():
@@ -204,7 +206,7 @@ class PGPMIME(KryptoMIME):
             signatures = [None]
             rawmail = HeaderParser().parsestr(mail.as_string())
             rawmail.del_param("x-action")
-            rawmail.set_payload(text)
+            rawmail.set_payload(text.rstrip()) # remove last line ending
         return payload, signatures, rawmail
 
     @staticmethod
@@ -265,6 +267,7 @@ class PGPMIME(KryptoMIME):
         from .mail import protect_mail, fix_lines
         results, key_ids = [], []
         signed, fmt = False, False
+        payload = str(payload) # copy
         for signature in signatures:
             if signature: signature = self._fix_quoting(signature)
             for ending in (None,'\r\n','\n'):
@@ -309,8 +312,9 @@ class PGPMIME(KryptoMIME):
         # possible encryptions: nothing,only signed, encrypted+signed, encrypted after signed 
         from email.parser import Parser
         from email.message import Message
+        from .mail import protect_mail
         import email.utils
-        if type(mail)==str: mail = Parser().parsestr(mail)
+        if type(mail)==str: mail = protect_mail(mail,ending=None)
         elif not isinstance(mail,Message): return False, results
         sender = mail.get('from', [])
         sender = self.find_key(email.utils.parseaddr(sender)[1])
@@ -364,8 +368,9 @@ class PGPMIME(KryptoMIME):
         # possible encryptions: nothing,only signed, encrypted+signed, encrypted after signed 
         from email.parser import Parser
         from email.message import Message
+        from .mail import protect_mail
         import email.utils
-        if type(mail)==str: mail = Parser().parsestr(mail)
+        if type(mail)==str: mail = protect_mail(mail,ending=None)
         elif not isinstance(mail,Message): return None, False, results
         sender = mail.get('from', [])
         sender = self.find_key(email.utils.parseaddr(sender)[1])
@@ -422,7 +427,7 @@ class PGPMIME(KryptoMIME):
         from email.parser import HeaderParser, Parser
         from .mail import protect_mail
         if not isinstance(mail,(Message,str)): return None, None
-        mail = protect_mail(mail,ending='\r\n',sevenbit=True) # fix line endings + 7bit
+        mail = protect_mail(mail,ending='\r\n',sevenbit=True) # fix line endings + 7bit RFC2822
         if not 'default_key' in kwargs:
             import email.utils
             sender = mail.get('from', [])
@@ -492,8 +497,8 @@ class PGPMIME(KryptoMIME):
         import email.utils
         from email.message import Message
         from email.parser import HeaderParser, Parser
-        from .mail import _mail_addreplace_header
-        if type(mail)==str: mail = Parser().parsestr(mail)
+        from .mail import _mail_addreplace_header, protect_mail
+        if type(mail)==str: mail = protect_mail(mail,ending=None)
         elif not isinstance(mail,Message): return None, None
         tos = mail.get_all('to', [])
         ccs = mail.get_all('cc', [])
@@ -660,7 +665,7 @@ class GPGMIME(PGPMIME):
         for line in data.splitlines(True)[3:]: # remove first three lines
             if line.rstrip()=='-----BEGIN PGP SIGNATURE-----': break
             text += line
-        return text
+        return text.rstrip()
 
     def pubkey_attachment(self,key): # pragma: no cover
         "returns an attachment with the specified public key"

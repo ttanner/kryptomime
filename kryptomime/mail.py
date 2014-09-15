@@ -18,7 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
-def fix_lines(text,ending='\n',replace=True,final=True):
+def fix_lines(text,ending='\n',replace=True,final=False):
     "fix line ending in text: 'replace' all or not, ensure 'final' line ending"
     if not text or not ending: return text
     if replace:
@@ -60,17 +60,20 @@ def _mail_transfer_content(src,dest):
         _mail_addreplace_header(dest,key,src.get(key))
 
 def as_protected(txt,ending=None,headersonly=False):
-    "convert txt to a protected message without modifying the subparts"
+    "convert txt to a protected message without modifying the subparts. only for internal use!"
     from email.parser import HeaderParser, Parser
     P = HeaderParser if headersonly else Parser
     if isinstance(txt,ProtectedMessage):
-        if (not ending or ending==txt.ending) and not headersonly: return txt
+        if (not ending or ending==txt.ending) and not headersonly:
+            import copy
+            return copy.deepcopy(txt)
         txt = txt.as_string()
     elif isinstance(txt,Message): txt = _mail_raw(txt)
     if not ending: # autodetect CRLF or LF
         i = txt.find('\n')
         if i>0 and txt[i-1]=='\r': ending='\r\n' #CRLF
         else: ending='\n' # default LF
+    else: txt = fix_lines(txt,ending) # convert endings
     mail = P(_class=ProtectedMessage).parsestr(txt)
     mail.ending = ending
     return mail
@@ -89,6 +92,7 @@ def protect_mail(mail,ending='\r\n',sevenbit=True):
             if not enc in msg: msg.add_header(enc,'7bit')
 
     mail = as_protected(mail,ending=ending)
+    ending = mail.ending # get new or orignal endings
     if mail.is_multipart():
         converted = []
         for submsg in mail.get_payload():
@@ -96,13 +100,13 @@ def protect_mail(mail,ending='\r\n',sevenbit=True):
                 submsg = protect_mail(submsg,ending,sevenbit)
             else:
                 if sevenbit: toseven(submsg)
-                if ending: submsg = as_protected(submsg,ending=ending)
+                submsg = as_protected(submsg,ending=ending)
             converted.append(submsg)
         mail.set_payload(None)
         for submsg in converted: mail.attach(submsg)
     else:
         if sevenbit: toseven(mail)
-        if ending: mail.set_payload(fix_lines(mail.get_payload(),ending=ending))
+        mail.set_payload(fix_lines(mail.get_payload(),ending=ending))
     return mail
 
 def create_mail(sender,to,subject,body,cc='',attach=None,time=None,headers={}):

@@ -41,7 +41,7 @@ class PyTest(TestCommand):
         #import here, cause outside the eggs aren't loaded
         import pytest, sys
         args = [self.pytest_args] if self.pytest_args else []
-        errno = pytest.main(['kryptomime/tests']+args)
+        errno = pytest.main(['tests']+args)
         sys.exit(errno)
 
 setuptools.setup(
@@ -50,7 +50,7 @@ setuptools.setup(
     long_description=open('README.rst').read(),
     license="GPLv3+",
 
-    version='0.2.2',
+    version='0.3.0',
     author=__author__,
     author_email=__contact__,
     maintainer=__author__,
@@ -61,10 +61,10 @@ setuptools.setup(
     packages=['kryptomime'],
     package_data={'': ['README.rst', 'COPYING.txt', 'requirements.txt']},
 
-    tests_require=['pytest','coverage'],
+    tests_require=['pytest','pytest-pythonpath','coverage'],
     cmdclass = {'test': PyTest},
 
-    install_requires=['gnupg==1.2.6','six>=1.4.1'],
+    install_requires=['gnupg>=1.2.6','six>=1.4.1'],
     extras_require={'docs': ["Sphinx>=1.1", "repoze.sphinx"]},
 
     platforms="Linux, BSD, OSX, Windows",
