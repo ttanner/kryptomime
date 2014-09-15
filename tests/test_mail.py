@@ -19,7 +19,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
-from kryptomime.mail import protect_mail
+from kryptomime.mail import protect_mail, as_protected, create_mail
 
 def test_protect():
     #> From foo
@@ -47,3 +47,12 @@ line2
 '''
     prot = protect_mail(msg,ending='\n',sevenbit=True)
     assert prot.as_string() == msg
+
+def test_attach():
+    import email.mime.text
+    attachment = email.mime.text.MIMEText('some\nattachment')
+    msg = create_mail('foo@localhost','bar@localhost','subject','body\nmessage',attach=[attachment])
+    prot = as_protected(msg)
+    assert prot.as_string() == msg.as_string()
+    prot = protect_mail(msg,ending='\n',sevenbit=True)
+    assert prot.as_string() == msg.as_string()

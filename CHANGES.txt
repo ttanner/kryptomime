@@ -1,6 +1,7 @@
 v0.3.0, 16.09.2014
 ------------------
 - use pytest for tests
+- drop support for Python 2.6
 - major bugfixes for line endings
 - bugfix: don't modify input
 - enable blank line work around only for broken Python versions
