@@ -1,5 +1,6 @@
 v0.3.0, 16.09.2014
 ------------------
+- raise exceptions for invalid input or missing keys
 - use pytest for tests
 - drop support for Python 2.6
 - major bugfixes for line endings

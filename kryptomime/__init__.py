@@ -19,6 +19,6 @@
 # For more details see the file COPYING.
 
 from .mail import KryptoMIME, ProtectedMessage, create_mail, protect_mail
-from .pgp import GPGMIME
+from .pgp import GPGMIME, KeyMissingError
 from .transport import IMAP4_TLS, SMTP_TLS
-version = (0,2,2) # major (backwards incompatible), minor (backwards compatible, feature-level), implementation (bugfixes)
+version = (0,3,0) # major (backwards incompatible), minor (backwards compatible, feature-level), implementation (bugfixes)

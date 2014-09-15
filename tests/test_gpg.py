@@ -21,7 +21,7 @@
 
 from pytest import fixture, mark, raises
 
-from kryptomime import create_mail, GPGMIME, protect_mail
+from kryptomime import create_mail, GPGMIME, protect_mail, KeyMissingError
 from kryptomime.pgp import find_gnupg_key
 
 import gnupg, email.mime.text
@@ -211,11 +211,13 @@ def test_encrypt(gpgsender):
 
 def test_unknown_sign(gpgreceiver):
     # bad sign
-    assert gpgreceiver.sign(msg)[0] is None # sender key missing - cannot sign
+    with raises(KeyMissingError):
+        gpgreceiver.sign(msg) # sender key missing - cannot sign
 
 def test_unknown_encrypt(gpgsender):
     # bad encrypt
-    assert gpgsender.encrypt(msg)[0] is None # receiver key missing - cannot encrypt
+    with raises(KeyMissingError):
+        gpgsender.encrypt(msg) # receiver key missing - cannot encrypt
 
 @fixture(scope='module')
 def unilateral(request,keys):
@@ -391,7 +393,8 @@ class TestBilateral:
         assert id1.encrypt(msg,sign=True)[0] is None
         # no receiver key, cannot decrypt
         enc = bilateral['id2'].encrypt(msgrev)[0]
-        assert enc and id1.decrypt(enc)[0] is None
+        assert enc
+        with raises(KeyMissingError): id1.decrypt(enc)
 
     def test_bad_passphrase(self,bilateral):
         # bad sender passphrase, cannot sign
@@ -405,12 +408,11 @@ class TestBilateral:
     def test_bad_defkey(self,bilateral):
         # bad sender passphrase, cannot sign
         id1 = GPGMIME(bilateral['gpg1'],default_key=receiver)
-        assert id1.sign(msgrev)[0] is None
-        assert id1.encrypt(msgrev,sign=True)[0] is None
+        with raises(KeyMissingError): id1.sign(msgrev)
+        with raises(KeyMissingError): id1.encrypt(msgrev,sign=True)
         # bad receiver key, cannot decrypt
         enc = bilateral['id2'].encrypt(msgrev,toself=False)[0]
-        assert enc
-        assert id1.decrypt(enc)[0] is None
+        assert enc and id1.decrypt(enc)[0] is None
 
     def bad_sign(self,ids,receiver,msg,encrypt):
         # id1 signs, but id2 doesn't know id1
@@ -439,12 +441,8 @@ class TestBilateral:
         id1, id2 = ids['id1'], receiver
         enc,_ = id1.encrypt(msgself,sign=sign)
         assert enc and id2.analyze(enc) == (True,None)
-        mail, verified, result1 = id2.decrypt(enc)
         verified2, result2 = id2.verify(enc)
-        assert not mail and result1 and result2
-        assert result1['encrypted'] and not verified and not verified2
-        assert not result1['key_ids'] and not result2['key_ids']
-        assert not result1['signed'] and not result2['signed']
+        with raises(KeyMissingError): id2.decrypt(enc)
 
     def test_bad_encrypt(self,bilateral,gpgreceiver):
         self.bad_encrypt(bilateral,gpgreceiver,False)

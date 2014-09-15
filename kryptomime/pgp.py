@@ -23,6 +23,12 @@
 
 from .mail import KryptoMIME
 
+class KeyMissingError(Exception):
+    def __init__(self, key):
+        self.key = key
+    def __str__(self):
+        return "key missing: "+self.key
+
 class PGPMIME(KryptoMIME):
 
     def find_key(self,addr,secret=False):
@@ -257,7 +263,8 @@ class PGPMIME(KryptoMIME):
         from email.message import Message
         from .mail import protect_mail
         if type(mail)==str: mail = protect_mail(mail,ending=None)
-        elif not isinstance(mail,Message): return None, False
+        elif not isinstance(mail,Message):
+            raise TypeError("mail must be Message or str")
         payload, signatures, rawmail = self._signature(mail)
         return rawmail, len(signatures)>0
 
@@ -368,14 +375,16 @@ class PGPMIME(KryptoMIME):
         from .mail import protect_mail
         import email.utils
         if type(mail)==str: mail = protect_mail(mail,ending=None)
-        elif not isinstance(mail,Message): return None, False, results
+        elif not isinstance(mail,Message):
+            raise TypeError("mail must be Message or str")
         sender = mail.get('from', [])
         sender = self.find_key(email.utils.parseaddr(sender)[1])
         ciphertext, is_pgpmime = self._ciphertext(mail)
         if ciphertext: # Ciphertext present? Decode
             results['encrypted'] = True
             if not 'default_key' in kwargs:
-                if not self.default_key: return None, False, results # key required
+                if not self.default_key:
+                    raise KeyMissingError("default")
                 tos = mail.get_all('to', [])
                 ccs = mail.get_all('cc', [])
                 receiver = None
@@ -383,10 +392,10 @@ class PGPMIME(KryptoMIME):
                     receiver = self.find_key(email.utils.formataddr(to))
                     if receiver: break
                 if not receiver:
-                    return None, False, results # cannot decrypt
+                    raise KeyMissingError("receiver")
                 kwargs['default_key'] = receiver
             elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
-                return None, False, results # key required
+                raise KeyMissingError("default")
             ciphertext = self._fix_quoting(ciphertext)
             result = self.decrypt_str(ciphertext, **kwargs)
             results['decryption'] = result
@@ -422,16 +431,18 @@ class PGPMIME(KryptoMIME):
         """
         from email.message import Message
         from .mail import protect_mail
-        if not isinstance(mail,(Message,str)): return None, None
+        if not isinstance(mail,(Message,str)):
+            raise TypeError("mail must be Message or str")
         mail = protect_mail(mail,ending='\r\n',sevenbit=True) # fix line endings + 7bit RFC2822
         if not 'default_key' in kwargs:
             import email.utils
             sender = mail.get('from', [])
             sender = self.find_key(email.utils.parseaddr(sender)[1],secret=True)
-            if not sender: return None, None # key required
+            if not sender:
+                raise KeyMissingError("sender")
             kwargs['default_key'] = sender
         elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
-            return None, None # key required
+            raise KeyMissingError("default")
         plaintext, submsg = self._plaintext(mail, inline)
         # Generate signature, report errors
         try:
@@ -494,23 +505,25 @@ class PGPMIME(KryptoMIME):
         from email.message import Message
         from .mail import _mail_addreplace_header, protect_mail
         if type(mail)==str: mail = protect_mail(mail,ending=None)
-        elif not isinstance(mail,Message): return None, None
+        elif not isinstance(mail,Message):
+            raise TypeError("mail must be Message or str")
         tos = mail.get_all('to', [])
         ccs = mail.get_all('cc', [])
         recipients = [self.find_key(email.utils.formataddr(to)) for to in email.utils.getaddresses(tos + ccs)]
-        if None in recipients: return None, None # key required
+        if None in recipients:
+            raise KeyMissingError("recipients")
         if toself or sign:
             sender = email.utils.parseaddr(mail.get('from', []))[1]
             senderkey = self.find_key(sender,secret=True)
-            if not senderkey: return None, None # key required
+            if not senderkey:
+                raise KeyMissingError("sender")
             if toself:
                 if not senderkey in recipients: recipients.append(senderkey)
         if sign:
             if not 'default_key' in kwargs:
-                #if not self.default_key: return None, None # key required
                 kwargs['default_key'] = senderkey
             elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
-                return None, None # key required
+                raise KeyMissingError("default")
         plaintext, submsg = self._plaintext(mail, inline, protect=False)
         # Do encryption, report errors
         kwargs['sign'] = sign
