@@ -50,7 +50,7 @@ setuptools.setup(
     long_description=open('README.rst').read(),
     license="GPLv3+",
 
-    version='0.3.0',
+    version='0.3.1',
     author=__author__,
     author_email=__contact__,
     maintainer=__author__,
@@ -64,7 +64,7 @@ setuptools.setup(
     tests_require=['pytest','pytest-pythonpath','coverage'],
     cmdclass = {'test': PyTest},
 
-    install_requires=['gnupg>=1.2.6','six>=1.4.1'],
+    install_requires=['gnupg>=1.3.2','six>=1.4.1'],
     extras_require={'docs': ["Sphinx>=1.1", "repoze.sphinx"]},
 
     platforms="Linux, BSD, OSX, Windows",
