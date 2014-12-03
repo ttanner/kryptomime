@@ -89,8 +89,8 @@ def keys(request):
     if keygen:
         for fname in keyrings+secrings:
             if os.path.exists(fname): os.unlink(fname)
-    gpg1 = gnupg.GPG(keyring=keyrings[0],secring=secrings[0],verbose=verbose)
-    gpg2 = gnupg.GPG(keyring=keyrings[1],secring=secrings[1],verbose=verbose)
+    gpg1 = gnupg.GPG(keyring=keyrings[0],secring=secrings[0],verbose=verbose,use_agent=False)
+    gpg2 = gnupg.GPG(keyring=keyrings[1],secring=secrings[1],verbose=verbose,use_agent=False)
     if keygen:
         key1 = gpg1.gen_key(gpg1.gen_key_input(name_email=sender,key_length=1024,passphrase=passphrase)).fingerprint
         key2 = gpg2.gen_key(gpg2.gen_key_input(name_email=receiver,key_length=1024)).fingerprint
@@ -222,7 +222,7 @@ def test_unknown_encrypt(gpgsender):
 @fixture(scope='module')
 def unilateral(request,keys):
     keyring = mktmp()
-    gpg = gnupg.GPG(keyring=keyring,secring=keys['secrings'][0])
+    gpg = gnupg.GPG(keyring=keyring,secring=keys['secrings'][0],use_agent=False)
     gpg.import_keys(keys['pubkey1'])
     gpg.import_keys(keys['pubkey2']) # sender knows receiver pubkey
     id = GPGMIME(gpg,default_key=(sender,passphrase))
@@ -243,7 +243,7 @@ class TestUnilateral:
         verified2, result2 = id1.verify(msg)
         assert raw and result1 and result2
         assert not result1['encrypted'] and not (verified or result1['signed'] or result2['signed'])
-        assert not (result1['key_ids'] or result2['key_ids'])
+        assert not (result1['fingerprints'] or result2['fingerprints'])
         compare_mail(msg,raw)
 
     def test_verify(self,unilateral):
@@ -258,8 +258,8 @@ class TestUnilateral:
         raw, verified, result1 = id1.decrypt(sgn)
         verified2, result2 = id1.verify(sgn)
         assert raw and result1 and result2
-        assert not result1['encrypted'] and verified and result1['signed'] and result2['signed'] and result1['key_ids']
-        assert result1['key_ids']==result2['key_ids']
+        assert not result1['encrypted'] and verified and result1['signed'] and result2['signed'] and result1['fingerprints']
+        assert result1['fingerprints']==result2['fingerprints']
 
     def test_sender_signed_nl(self,unilateral,gpgreceiver):
         # good self sign
@@ -268,8 +268,8 @@ class TestUnilateral:
         raw, verified, result1 = id1.decrypt(sgn,strict=False)
         verified2, result2 = id1.verify(sgn,strict=False)
         assert raw and result1 and result2
-        assert not result1['encrypted'] and verified and result1['signed'] and result2['signed'] and result1['key_ids']
-        assert result1['key_ids']==result2['key_ids']
+        assert not result1['encrypted'] and verified and result1['signed'] and result2['signed'] and result1['fingerprints']
+        assert result1['fingerprints']==result2['fingerprints']
 
     def test_sender_encrypted(self,unilateral,gpgreceiver):
         # bad self decrypt
@@ -278,7 +278,7 @@ class TestUnilateral:
         verified2, result2 = id1.verify(enc)
         assert not raw and result1 and result2
         assert result1['encrypted'] and not (verified or result1['signed'] or result2['signed'])
-        assert not (result1['key_ids'] or result2['key_ids'])
+        assert not (result1['fingerprints'] or result2['fingerprints'])
 
     def test_receiver_signed(self,unilateral,gpgreceiver):
         # bad sign
@@ -289,7 +289,7 @@ class TestUnilateral:
         assert raw and result1 and result2
         assert not result1['encrypted'] and not verified
         assert result1['signed'] and result2['signed']
-        assert not (result1['key_ids'] or result2['key_ids'])
+        assert not (result1['fingerprints'] or result2['fingerprints'])
         compare_mail(prot,raw)
 
     def test_receiver_encrypted(self,unilateral,gpgreceiver):
@@ -299,14 +299,14 @@ class TestUnilateral:
         verified2, result2 = id2.verify(enc)
         assert raw and result1 and result2
         assert result1['encrypted'] and not (verified or result1['signed'] or result2['signed'])
-        assert not (result1['key_ids'] or result2['key_ids'])
+        assert not (result1['fingerprints'] or result2['fingerprints'])
         compare_mail(msg,raw)
 
 @fixture(scope='module')
 def bilateral(request,keys):
     keyrings = [mktmp() for i in range(2)]
-    gpg1 = gnupg.GPG(keyring=keyrings[0],secring=keys['secrings'][0])
-    gpg2 = gnupg.GPG(keyring=keyrings[1],secring=keys['secrings'][1])
+    gpg1 = gnupg.GPG(keyring=keyrings[0],secring=keys['secrings'][0],use_agent=False)
+    gpg2 = gnupg.GPG(keyring=keyrings[1],secring=keys['secrings'][1],use_agent=False)
     gpg1.import_keys(keys['pubkey1'])
     gpg1.import_keys(keys['pubkey2']) # sender knows receiver pubkey
     gpg2.import_keys(keys['pubkey1'])
@@ -338,7 +338,7 @@ class TestBilateral:
         verified2, result2 = id2.verify(enc)
         assert mail and verified==verified2 and result1 and result2
         assert result1['encrypted'] and verified==sign and result1['signed']==sign and result2['signed']==sign
-        assert result1['key_ids']==result2['key_ids']
+        assert result1['fingerprints']==result2['fingerprints']
         compare_mail(mail,msg)
 
     def sign(self,ids,msg,inline):
@@ -353,7 +353,7 @@ class TestBilateral:
         compare_mail(mail,rawmail)
         assert result1 and result2
         assert not result1['encrypted'] and verified and result1['signed'] and result2['signed']
-        assert result1['key_ids']==result2['key_ids']
+        assert result1['fingerprints']==result2['fingerprints']
         compare_mail(rawmail,prot)
 
     def test_sign(self,bilateral):
@@ -428,7 +428,7 @@ class TestBilateral:
         assert mail and result1 and result2
         assert result1['encrypted']==encrypt and not verified and not verified2
         assert result1['signed'] and result2['signed']
-        assert not result1['key_ids'] and not result2['key_ids']
+        assert not result1['fingerprints'] and not result2['fingerprints']
 
     def test_bad_sign(self,bilateral,gpgreceiver):
         self.bad_sign(bilateral,gpgreceiver,msg, False)

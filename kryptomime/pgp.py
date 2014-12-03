@@ -268,10 +268,10 @@ class PGPMIME(KryptoMIME):
         payload, signatures, rawmail = self._signature(mail)
         return rawmail, len(signatures)>0
 
-    def _check_signatures(self,payload,signatures,rawmail,strict=True):
-        "returns mail without signature, whether it was signed and with which keyids"
+    def _check_signatures(self,payload,signatures,rawmail,strict=False):
+        "returns mail without signature, whether it was signed and with which keys"
         from .mail import protect_mail, fix_lines
-        results, key_ids = [], []
+        results, key_ids, fingerprints = [], [], []
         signed, fmt = False, False
         payload = str(payload) # copy
         for signature in signatures:
@@ -295,10 +295,11 @@ class PGPMIME(KryptoMIME):
                     break
             if not result: continue # no valid signature
             key_ids.append(result.key_id)
+            fingerprints.append(result.fingerprint)
             results.append(result)
-        return rawmail, {'signed':signed,'key_ids':key_ids,'results':results}
+        return rawmail, {'signed':signed,'fingerprints':fingerprints,'key_ids':key_ids,'results':results}
 
-    def verify(self, mail, strict=True, **kwargs):
+    def verify(self, mail, strict=False, **kwargs):
         """Verifies the validity of the signature of an email.
 
         :type mail: string or Message object
@@ -307,14 +308,15 @@ class PGPMIME(KryptoMIME):
         :type strict: bool
         :returns: whether the input was signed by the sender and detailed results
              (whether it was 'encrypted',the 'decryption' results, whether it was 'signed',
-             the verification 'results' and valid 'key_ids')
-        :rtype: (bool,{encrypted:bool,signed:bool,key_ids:list,decryption:dict,results:list of dicts})
+             the verification 'results' and valid 'key_ids'/'fingerprints')
+        :rtype: (bool,{encrypted:bool,signed:bool,fingerprints:list,key_ids:list,decryption:dict,results:list of dicts})
 
         RFC1847 2.1 requires no modification of signed payloads, but some MTA change the line endings,
         which breaks the signature. With strict=False it is also checked, whether the signature would
         be valid after conversion to full CR/LF or LF.
         """
-        results = {'encrypted':False,'decryption':None,'signed':False,'key_ids':[],'results':[]}
+        results = {'encrypted':False,'decryption':None,'signed':False,
+                    'fingerprints':[],'key_ids':[],'results':[]}
         # possible encryptions: nothing,only signed, encrypted+signed, encrypted after signed 
         from email.message import Message
         import email.utils
@@ -339,20 +341,22 @@ class PGPMIME(KryptoMIME):
                 return False, results # cannot decrypt
             if result.key_id: results['signed'] = True
             if result.valid:
+                results['fingerprints'] = [result.fingerprint]
                 results['key_ids'] = [result.key_id]
                 results['results'] = [result]
-                if sender == result.key_id: return True, results
+                if sender == result.fingerprint: return True, results
             plaintext = str(result)
             mail = self._decoded(mail,plaintext,is_pgpmime)
         payload, signatures, rawmail = self._signature(mail)
         if not payload: return False, results # no plain msg
         rawmail, sresults = self._check_signatures(payload, signatures, rawmail, strict=strict)
         if sresults['signed']: results['signed'] = True
+        results['fingerprints'].extend(sresults['fingerprints'])
         results['key_ids'].extend(sresults['key_ids'])
         results['results'].extend(sresults['results'])
-        return results['signed'] and sender in results['key_ids'], results
+        return results['signed'] and sender in results['fingerprints'], results
 
-    def decrypt(self, mail, strict=True, **kwargs):
+    def decrypt(self, mail, strict=False, **kwargs):
         """Decrypts and verifies an email.
 
         :param mail: A string or email
@@ -362,14 +366,15 @@ class PGPMIME(KryptoMIME):
         :returns: An email without signature (None if the decryption failed),
              whether the input was signed by the sender and detailed results
              (whether it was 'encrypted',the 'decryption' results, whether it was 'signed',
-             the decryption 'results' and valid 'key_ids')
+             the decryption 'results' and valid 'key_ids'/'fingerprints')
         :rtype: (Message,bool,{encrypted:bool,signed:bool,key_ids:list,decryption:dict,results:list of dicts})
 
         RFC1847 2.1 requires no modification of signed payloads, but some MTA change the line endings,
         which breaks the signature. With strict=False it is also checked, whether the signature would
         be valid after conversion to full CR/LF or LF.
         """
-        results = {'encrypted':False,'decryption':None,'signed':False,'key_ids':[],'results':[]}
+        results = {'encrypted':False,'decryption':None,'signed':False,
+                    'fingerprints':[],'key_ids':[],'results':[]}
         # possible encryptions: nothing,only signed, encrypted+signed, encrypted after signed 
         from email.message import Message
         from .mail import protect_mail
@@ -406,16 +411,18 @@ class PGPMIME(KryptoMIME):
             plaintext = str(result)
             mail = self._decoded(mail,plaintext,is_pgpmime)
             if result.valid:
+                results['fingerprints'] = [result.fingerprint]
                 results['key_ids'] = [result.key_id]
                 results['results'] = [result]
-                if sender == result.key_id: return mail, True, results
+                if sender == result.fingerprint: return mail, True, results
         payload, signatures, rawmail = self._signature(mail)
         if not payload: return rawmail, False, results # no plain msg
         rawmail, sresults = self._check_signatures(payload, signatures, rawmail, strict=strict)
         if sresults['signed']: results['signed'] = True
+        results['fingerprints'].extend(sresults['fingerprints'])
         results['key_ids'].extend(sresults['key_ids'])
         results['results'].extend(sresults['results'])
-        return rawmail, results['signed'] and sender in results['key_ids'], results
+        return rawmail, results['signed'] and sender in results['fingerprints'], results
 
     def sign(self, mail, inline=False, verify=False, **kwargs):
         """Signs an email with the sender's (From) signature.
@@ -567,9 +574,9 @@ class PGPMIME(KryptoMIME):
             encmail.attach(submsg)
         return encmail, result
 
-def find_gnupg_key(gpg,addr,secret=False):
+def find_gnupg_key(gpg,addr,secret=False,key_ids=False):
     """find keyid for email 'addr' or return None.
-    If addr is a list or tuple, return a dict(addr:keyid) """
+    If addr is a list or tuple, return a dict(addr:fingerprint) """
     import email.utils
     if type(addr) in (list,tuple):
         result = {}
@@ -580,7 +587,8 @@ def find_gnupg_key(gpg,addr,secret=False):
     for key in gpg.list_keys(secret):
         for uid in key['uids']:
             if uid.find(addr)>=0:
-                return key['keyid']
+                if key_ids: return key['keyid']
+                return key['fingerprint']
     return None
 
 class GPGMIME(PGPMIME):
@@ -669,9 +677,12 @@ class GPGMIME(PGPMIME):
             text += line
         return text.rstrip()
 
-    def pubkey_attachment(self,key): # pragma: no cover
-        "returns an attachment with the specified public key"
+    def pubkey_attachment(self,key=None): # pragma: no cover
+        "returns an attachment with the specified public key (default key if none specified)"
         from email.mime.text import MIMEText
+        if not key:
+            key = self.default_key
+            if type(key)==tuple: key = key[0]
         key = self.find_key(key) or key
         pubkey = self.gpg.export_keys(key)
         attach = MIMEText(pubkey)
@@ -686,12 +697,12 @@ class GPGMIME(PGPMIME):
             if kwargs['sign']: kwargs['default_key'] = kwargs['sign']
             del kwargs['sign']
         kwargs = self._set_default_key(kwargs)
-        keyids = []
+        keys = []
         for recipient in recipients:
             key = self.find_key(recipient)
-            if key: keyids.append(key)
-            else: keyids.append(recipient)
-        return keyids, kwargs
+            if key: keys.append(key)
+            else: keys.append(recipient)
+        return keys, kwargs
 
     def encrypt_file(self, file, recipients, **kwargs):
         recipients, kwargs = self._encrypt_params(recipients, kwargs)

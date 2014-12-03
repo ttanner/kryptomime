@@ -1,3 +1,12 @@
+v0.4.0, 03.12.2014
+------------------
+- include fingerprints of signatures in result and compare only those
+- pubkey_attachment returns default key if no key specified
+- key_ids option for find_gnupg_key
+- backwards incompatible changes:
+- * the default for 'strict' is now False
+- * find_gnupg_key returns fingerprints by default
+
 v0.3.1, 10.10.2014
 ------------------
 - update for API incompatible change verify_str in gnupg 1.3.2
