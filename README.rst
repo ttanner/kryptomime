@@ -14,7 +14,11 @@ comes with ABSOLUTELY NO WARRANTY. USE THIS SOFTWARE AT YOUR OWN RISK.
 .. image:: https://travis-ci.org/ttanner/kryptomime.png?branch=master 
     :target: https://travis-ci.org/ttanner/kryptomime
     :alt: Build status
-    
+
+.. image:: https://coveralls.io/repos/ttanner/kryptomime/badge.png
+    :target: https://coveralls.io/r/ttanner/kryptomime
+    :alt: Coverage
+
 Installation
 ~~~~~~~~~~~~
 
