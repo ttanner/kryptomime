@@ -26,4 +26,4 @@ from .transport import IMAP4_TLS, SMTP_TLS
 # major (backwards incompatible),
 # minor (backwards compatible, feature-level),
 # implementation (bugfixes)
-version = (0,4,0)
+version = (0,4,1)

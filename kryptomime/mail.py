@@ -131,7 +131,7 @@ def create_mail(sender,to,subject,body,cc='',attach=None,time=None,headers={}):
     for k, v in iteritems(headers):
         if k.lower()=='content-type':
             msg.set_type(v)
-        elif msg.has_key(k):
+        elif k in msg:
             msg.replace_header(k,v)
         else:
             msg.add_header(k,v)

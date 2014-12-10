@@ -1,3 +1,7 @@
+v0.4.1, 10.12.2014
+------------------
+- minor Python 3 compatibility fix
+
 v0.4.0, 03.12.2014
 ------------------
 - include fingerprints of signatures in result and compare only those

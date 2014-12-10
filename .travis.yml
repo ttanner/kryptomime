@@ -4,9 +4,9 @@ before_install:
   - sudo apt-get install gnupg
 python:
   - "2.7"
-  - "3.3"
   - "3.4"
 install:
+  - pip install coveralls
   - pip install gnupg
   - pip install psutil
   - pip install pytest
@@ -16,3 +16,5 @@ install:
 script:
   - coverage run --source kryptomime -m py.test tests
   - coverage report
+after_success:
+  coveralls
