@@ -19,7 +19,26 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
-from kryptomime.mail import protect_mail, as_protected, create_mail
+from pytest import raises
+from kryptomime.mail import (protect_mail, as_protected, create_mail, check_charset,
+     fix_lines, _mail_addreplace_header)
+
+from conftest import sender, receiver
+
+def test_fixlines():
+    assert fix_lines('') == ''
+    assert fix_lines('a\r\nb',linesep=None) == 'a\r\nb'
+    for var in range(16):
+        first,linesep,final,replace=var&8,var&4,var&2,var&1
+        first = '\r\n' if first else '\n'
+        linesep = '\r\n' if linesep else '\n'
+        for last in ('','\n','\r\n'):
+            input = 'a'+first+'b'+last
+            output = 'a'
+            output+= linesep if replace else first
+            output+= 'b'
+            output+= linesep if final or (replace and last) else last
+            assert fix_lines(input,linesep=linesep,final=final,replace=replace) == output
 
 def test_protect():
     #> From foo
@@ -45,14 +64,104 @@ attachment
 line2
 --------------030608090900090202040409--
 '''
-    prot = protect_mail(msg,ending='\n',sevenbit=True)
+    prot = protect_mail(msg,linesep='\n',sevenbit=True)
     assert prot.as_string() == msg
+    prot = protect_mail(msg,linesep='\r\n',sevenbit=True)
+    assert prot.as_string() == fix_lines(msg,'\r\n')
+    msg = create_mail(sender,receiver,'subject','body\nmessage')
+    prot = protect_mail(msg,linesep='\n')
+    assert msg.get_payload() == prot.get_payload()
+    prot = protect_mail(msg,linesep='\r\n')
+    assert fix_lines(msg.get_payload(),'\r\n') == prot.get_payload()
 
 def test_attach():
     import email.mime.text
     attachment = email.mime.text.MIMEText('some\nattachment')
-    msg = create_mail('foo@localhost','bar@localhost','subject','body\nmessage',attach=[attachment])
+    msg = create_mail(sender,receiver,'subject','body\nmessage',attach=[attachment])
+    # boundary is generated randomly by as_string - hardcode here
+    msg.set_boundary('===============1808028167789866750==')
     prot = as_protected(msg)
     assert prot.as_string() == msg.as_string()
-    prot = protect_mail(msg,ending='\n',sevenbit=True)
+    prot = protect_mail(msg,linesep='\n',sevenbit=True)
     assert prot.as_string() == msg.as_string()
+
+def test_charset():
+    import six
+    cascii, clatin, cutf = 'us-ascii', 'latin_1', 'UTF-8'
+    s = 'uber'
+    assert check_charset(s,use_locale=False) == (s,cascii)
+    assert check_charset(s,cascii) == (s,cascii)
+    assert check_charset(s,clatin) == (s,clatin)
+    assert check_charset(s,cutf) == (s,cutf)
+    s = 'über'
+    assert check_charset(s,use_locale=False) == (s,cutf)
+    with raises(UnicodeError): assert check_charset(s,cascii)
+    assert check_charset(s,clatin) == (s,clatin)
+    assert check_charset(s,cutf) == (s,cutf)
+    l = '\xfcber'
+    if six.PY2:
+        with raises(UnicodeError): assert check_charset(l,use_locale=False)
+        with raises(UnicodeError): assert check_charset(l,cascii)
+        assert check_charset(l,clatin) == (l,clatin)
+        with raises(UnicodeError): assert check_charset(l,cutf)
+    u = u'über'
+    assert check_charset(u,use_locale=False) == (s,cutf)
+    with raises(UnicodeError): assert check_charset(s,cascii)
+    assert check_charset(u,clatin) == (l,clatin)
+    assert check_charset(u,cutf) == (s,cutf)
+
+def test_unicode():
+    from email.mime.text import MIMEText
+    from email.header import decode_header
+    import six
+    def get_header(msg,key):
+        v = msg[key]
+        if six.PY2:
+            v = decode_header(v)[0]
+            v = v[0].decode(v[1])
+        return v
+    usender = sender.replace('Foo',u'Föo')
+    ureceiver = receiver.replace('Bar',u'Bär')
+    usubject = u'sübject'
+    body = 'body\nmessage'
+    ubody = u'bödy\nmessage'
+    msg = create_mail(usender,ureceiver,usubject,body,headers={'X-Spam':'No'})
+    assert get_header(msg,'From') == usender
+    assert get_header(msg,'To') == ureceiver
+    assert get_header(msg,'Subject') == usubject
+    assert msg['X-Spam'] == 'No'
+    assert msg.get_charset() == 'us-ascii'
+    assert msg.get_payload(decode=False) == body
+
+    msg = create_mail(sender,receiver,'subject',ubody)
+    assert not msg['X-Spam']
+    _mail_addreplace_header(msg,'X-Spam','No')
+    assert msg['X-Spam'] == 'No'
+    _mail_addreplace_header(msg,'X-Spam','Yes')
+    assert msg['X-Spam'] == 'Yes'
+    assert msg.get_charset() == 'UTF-8'
+    assert msg.get_payload(decode=True).decode('UTF-8') == ubody
+
+    attachment = 'some\nattachment'
+    uattachment = u'söme\nattachment'
+    attach=MIMEText(attachment)
+    uattach=MIMEText(uattachment,_charset='utf-8')
+    for variant in range(1,4):
+        unibody,uniatt  = variant&1,variant&2
+        msg = create_mail(sender,receiver,'subject',ubody if unibody else body,
+            attach=[uattach if uniatt else attach])
+        assert not msg.get_charset()
+        submsg = msg.get_payload(0)
+        if unibody:
+            assert submsg.get_charset() == 'UTF-8'
+            assert submsg.get_payload(decode=True).decode('UTF-8') == ubody
+        else:
+            assert submsg.get_charset() == 'us-ascii'
+            assert submsg.get_payload(decode=False) == body
+        submsg = msg.get_payload(1)
+        if uniatt:
+            assert submsg.get_charset() == 'UTF-8'
+            assert submsg.get_payload(decode=True).decode('UTF-8') == uattachment
+        else:
+            assert submsg.get_charset() == 'us-ascii'
+            assert submsg.get_payload(decode=False) == attachment

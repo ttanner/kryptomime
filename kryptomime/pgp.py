@@ -21,7 +21,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
-from .mail import KryptoMIME
+from .core import KryptoMIME
 
 class KeyMissingError(Exception):
     def __init__(self, key):
@@ -92,7 +92,7 @@ class PGPMIME(KryptoMIME):
         is_pgpmime = False
         # Check: Is inline pgp?
         from .mail import protect_mail
-        if type(mail)==str: mail = protect_mail(mail,ending=None)
+        if type(mail)==str: mail = protect_mail(mail,linesep=None)
         if mail.get_content_type()=='application/pgp' or mail.get_param('x-action')=='pgp-encrypted':
             ciphertext = mail.get_payload()
             is_pgpmime = False
@@ -137,7 +137,7 @@ class PGPMIME(KryptoMIME):
 
     @staticmethod
     def _signature(mail):
-        from .mail import as_protected, _mail_raw, _mail_transfer_content, protect_mail
+        from .mail import as_protected, _mail_transfer_content, protect_mail
         from sys import version_info as vs
         payload = ''
         signatures = []
@@ -184,7 +184,7 @@ class PGPMIME(KryptoMIME):
                         break
                     elif not payload: # multipart?
                         # yes, including headers
-                        payload = _mail_raw(submsg)
+                        payload = submsg.as_string()
                         _mail_transfer_content(submsg,rawmail)
                         if submsg.is_multipart():
                             rawmail.set_payload(None)
@@ -210,7 +210,7 @@ class PGPMIME(KryptoMIME):
                 text += line
             signatures = [None]
             mail.del_param("x-action")
-            mail.set_payload(text.rstrip()) # remove last line ending
+            mail.set_payload(text.rstrip()) # remove last line separator
             rawmail = mail
         return payload, signatures, rawmail
 
@@ -219,8 +219,8 @@ class PGPMIME(KryptoMIME):
         # Check transfer type
         from .mail import _mail_addreplace_header, _mail_transfer_content
         from .mail import protect_mail
-        mail = protect_mail(mail,ending=None)
-        tmpmsg = protect_mail(plaintext,ending=None)
+        mail = protect_mail(mail,linesep=None)
+        tmpmsg = protect_mail(plaintext,linesep=None)
         if mail.get_content_type()=='application/pgp': mail.set_type("text/plain")
         mail.del_param("x-action")
         if tmpmsg.is_multipart() and len(tmpmsg.get_payload())==1:
@@ -246,7 +246,7 @@ class PGPMIME(KryptoMIME):
         """
         from email.message import Message
         from .mail import protect_mail
-        if type(mail)==str: mail = protect_mail(mail,ending=None)
+        if type(mail)==str: mail = protect_mail(mail,linesep=None)
         elif not isinstance(mail,Message): return False, False
         ciphertext, is_pgpmime = self._ciphertext(mail)
         if not ciphertext is None: return True, None
@@ -262,11 +262,24 @@ class PGPMIME(KryptoMIME):
         """
         from email.message import Message
         from .mail import protect_mail
-        if type(mail)==str: mail = protect_mail(mail,ending=None)
+        if type(mail)==str: mail = protect_mail(mail,linesep=None)
         elif not isinstance(mail,Message):
             raise TypeError("mail must be Message or str")
         payload, signatures, rawmail = self._signature(mail)
         return rawmail, len(signatures)>0
+
+    @staticmethod
+    def without_signature(data):
+        "remove signature from string, if present"
+        if len(data)<=10: return data # no signature
+        firstline = data.splitlines()[0]
+        if firstline!='-----BEGIN PGP SIGNED MESSAGE-----':
+            return data # no signature
+        text = ''
+        for line in data.splitlines(True)[3:]: # remove first three lines
+            if line.rstrip()=='-----BEGIN PGP SIGNATURE-----': break
+            text += line
+        return text.rstrip()
 
     def _check_signatures(self,payload,signatures,rawmail,strict=False):
         "returns mail without signature, whether it was signed and with which keys"
@@ -276,9 +289,9 @@ class PGPMIME(KryptoMIME):
         payload = str(payload) # copy
         for signature in signatures:
             if signature: signature = self._fix_quoting(signature)
-            for ending in (None,'\r\n','\n'):
-                if ending:
-                    tmp = fix_lines(payload,ending=ending)
+            for linesep in (None,'\r\n','\n'):
+                if linesep:
+                    tmp = fix_lines(payload,linesep=linesep)
                     if tmp==payload: continue
                 else: tmp = payload
                 if signature is None:
@@ -288,9 +301,9 @@ class PGPMIME(KryptoMIME):
                 if result.key_id: signed = True
                 if fmt or strict: break # already found format
                 if result.valid: # found valid
-                    if not fmt and ending:
+                    if not fmt and linesep:
                         payload = tmp # correct format
-                        rawmail = protect_mail(rawmail,ending=ending,sevenbit=False)
+                        rawmail = protect_mail(rawmail,linesep=linesep,sevenbit=False)
                     fmt = True
                     break
             if not result: continue # no valid signature
@@ -304,14 +317,14 @@ class PGPMIME(KryptoMIME):
 
         :type mail: string or Message object
         :param mail: A string or email
-        :param strict: Whether verify the message as is. Otherwise try with different line endings.
+        :param strict: Whether verify the message as is. Otherwise try with different line separators.
         :type strict: bool
         :returns: whether the input was signed by the sender and detailed results
              (whether it was 'encrypted',the 'decryption' results, whether it was 'signed',
              the verification 'results' and valid 'key_ids'/'fingerprints')
         :rtype: (bool,{encrypted:bool,signed:bool,fingerprints:list,key_ids:list,decryption:dict,results:list of dicts})
 
-        RFC1847 2.1 requires no modification of signed payloads, but some MTA change the line endings,
+        RFC1847 2.1 requires no modification of signed payloads, but some MTA change the line separators,
         which breaks the signature. With strict=False it is also checked, whether the signature would
         be valid after conversion to full CR/LF or LF.
         """
@@ -321,10 +334,12 @@ class PGPMIME(KryptoMIME):
         from email.message import Message
         import email.utils
         from .mail import protect_mail
-        if type(mail)==str: mail = protect_mail(mail,ending=None)
+        if type(mail)==str: mail = protect_mail(mail,linesep=None)
         elif not isinstance(mail,Message): return False, results
+        from email.header import decode_header
         sender = mail.get('from', [])
-        sender = self.find_key(email.utils.parseaddr(sender)[1])
+        sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
+        sender = self.find_key(sender)
         ciphertext, is_pgpmime = self._ciphertext(mail)
         if ciphertext: # Ciphertext present?
             results['encrypted'] = True
@@ -361,7 +376,7 @@ class PGPMIME(KryptoMIME):
 
         :param mail: A string or email
         :type mail: string or Message object
-        :param strict: Whether verify the message as is. Otherwise try with different line endings.
+        :param strict: Whether verify the message as is. Otherwise try with different line separators.
         :type strict: bool
         :returns: An email without signature (None if the decryption failed),
              whether the input was signed by the sender and detailed results
@@ -369,7 +384,7 @@ class PGPMIME(KryptoMIME):
              the decryption 'results' and valid 'key_ids'/'fingerprints')
         :rtype: (Message,bool,{encrypted:bool,signed:bool,key_ids:list,decryption:dict,results:list of dicts})
 
-        RFC1847 2.1 requires no modification of signed payloads, but some MTA change the line endings,
+        RFC1847 2.1 requires no modification of signed payloads, but some MTA change the line separators,
         which breaks the signature. With strict=False it is also checked, whether the signature would
         be valid after conversion to full CR/LF or LF.
         """
@@ -378,23 +393,25 @@ class PGPMIME(KryptoMIME):
         # possible encryptions: nothing,only signed, encrypted+signed, encrypted after signed 
         from email.message import Message
         from .mail import protect_mail
-        import email.utils
-        if type(mail)==str: mail = protect_mail(mail,ending=None)
+        import email.utils, six
+        if isinstance(mail, six.string_types):
+            mail = protect_mail(mail,linesep=None)
         elif not isinstance(mail,Message):
             raise TypeError("mail must be Message or str")
+        from email.header import decode_header
         sender = mail.get('from', [])
-        sender = self.find_key(email.utils.parseaddr(sender)[1])
+        sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
+        sender = self.find_key(sender)
         ciphertext, is_pgpmime = self._ciphertext(mail)
         if ciphertext: # Ciphertext present? Decode
             results['encrypted'] = True
             if not 'default_key' in kwargs:
                 if not self.default_key:
                     raise KeyMissingError("default")
-                tos = mail.get_all('to', [])
-                ccs = mail.get_all('cc', [])
+                tos = mail.get_all('to', []) + mail.get_all('cc', [])
                 receiver = None
-                for to in email.utils.getaddresses(tos + ccs):
-                    receiver = self.find_key(email.utils.formataddr(to))
+                for to in tos:
+                    receiver = self.find_key( email.utils.parseaddr(decode_header(to)[0][0])[1] )
                     if receiver: break
                 if not receiver:
                     raise KeyMissingError("receiver")
@@ -437,14 +454,17 @@ class PGPMIME(KryptoMIME):
         :rtype: (Message,dict)
         """
         from email.message import Message
-        from .mail import protect_mail
-        if not isinstance(mail,(Message,str)):
+        from .mail import protect_mail, as_protected
+        from six import string_types, PY3
+        if not isinstance(mail,(Message,)+string_types):
             raise TypeError("mail must be Message or str")
-        mail = protect_mail(mail,ending='\r\n',sevenbit=True) # fix line endings + 7bit RFC2822
+        mail = protect_mail(mail,linesep='\r\n',sevenbit=True) # fix line separators + 7bit RFC2822
         if not 'default_key' in kwargs:
             import email.utils
+            from email.header import decode_header
             sender = mail.get('from', [])
-            sender = self.find_key(email.utils.parseaddr(sender)[1],secret=True)
+            sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
+            sender = self.find_key(sender,secret=True)
             if not sender:
                 raise KeyMissingError("sender")
             kwargs['default_key'] = sender
@@ -477,6 +497,7 @@ class PGPMIME(KryptoMIME):
             tmp.set_param('protocol','application/pgp-signature')
             tmp.set_param('micalg','pgp-sha1;')
             mail.replace_header('Content-Type',tmp['Content-Type'])
+            if PY3: mail = as_protected(mail,headersonly=True)
             mail.set_payload(None)
             mail.preamble = 'This is an OpenPGP/MIME signed message (RFC 4880 and 3156)'
             assert submsg.as_string()==plaintext, "plaintext was broken"
@@ -508,19 +529,18 @@ class PGPMIME(KryptoMIME):
         :returns: The encrypted email (None if it fails) and the encryption details.
         :rtype: (Message,dict)
         """
-        import email.utils
+        import email.utils, six
+        from email.header import decode_header
         from email.message import Message
-        from .mail import _mail_addreplace_header, protect_mail
-        if type(mail)==str: mail = protect_mail(mail,ending=None)
-        elif not isinstance(mail,Message):
-            raise TypeError("mail must be Message or str")
-        tos = mail.get_all('to', [])
-        ccs = mail.get_all('cc', [])
-        recipients = [self.find_key(email.utils.formataddr(to)) for to in email.utils.getaddresses(tos + ccs)]
+        from .mail import _mail_addreplace_header, protect_mail, as_protected
+        mail = protect_mail(mail,linesep=None)
+        tos = mail.get_all('to', []) + mail.get_all('cc', [])
+        recipients = [self.find_key( email.utils.parseaddr(decode_header(to)[0][0])[1] ) for to in tos]
         if None in recipients:
             raise KeyMissingError("recipients")
         if toself or sign:
-            sender = email.utils.parseaddr(mail.get('from', []))[1]
+            sender = mail.get('from', [])
+            sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
             senderkey = self.find_key(sender,secret=True)
             if not senderkey:
                 raise KeyMissingError("sender")
@@ -548,31 +568,31 @@ class PGPMIME(KryptoMIME):
             vresult = self.decrypt_str(ciphertext, **kwargs)
             if not vresult.ok or (sign and not vresult.valid): return None, result
         # Compile encrypted message
-        encmail = protect_mail(mail,ending=None)
-        _mail_addreplace_header(encmail,'Content-Transfer-Encoding','7bit')
         if not mail.is_multipart() and inline:
-            encmail.set_payload(ciphertext)
-            encmail.set_param('x-action','pgp-encrypted')
+            _mail_addreplace_header(mail,'Content-Transfer-Encoding','7bit')
+            mail.set_payload(ciphertext)
+            mail.set_param('x-action','pgp-encrypted')
         else:
             # workaround to preserve header order
             tmp = Message()
-            tmp['Content-Type'] = encmail['Content-Type']
+            tmp['Content-Type'] = mail['Content-Type']
             tmp.set_type('multipart/encrypted')
             tmp.set_param('protocol','application/pgp-encrypted')
-            encmail.replace_header('Content-Type',tmp['Content-Type'])
-            encmail.preamble = 'This is an OpenPGP/MIME signed message (RFC 4880 and 3156)'
-            encmail.set_payload(None)
+            mail.replace_header('Content-Type',tmp['Content-Type'])
+            if six.PY3: mail = as_protected(mail,headersonly=True)
+            mail.preamble = 'This is an OpenPGP/MIME signed message (RFC 4880 and 3156)'
+            mail.set_payload(None)
             submsg = Message()
             submsg.add_header('Content-Type','application/pgp-encrypted')
             submsg.set_payload('Version: 1\n')
-            encmail.attach(submsg)
+            mail.attach(submsg)
             submsg = Message()
             submsg.add_header('Content-Type','application/octet-stream; name="encrypted.asc"')
             submsg.add_header('Content-Description', 'OpenPGP encrypted message')
             submsg.add_header('Content-Disposition','inline; filename="encrypted.asc"')
             submsg.set_payload(ciphertext)
-            encmail.attach(submsg)
-        return encmail, result
+            mail.attach(submsg)
+        return mail, result
 
 def find_gnupg_key(gpg,addr,secret=False,key_ids=False):
     """find keyid for email 'addr' or return None.
@@ -582,6 +602,8 @@ def find_gnupg_key(gpg,addr,secret=False,key_ids=False):
         result = {}
         for a in addr: result[a] = find_gnupg_key(gpg,a,secret)
         return result
+    from email.header import decode_header
+    addr = decode_header(addr)[0][0]
     addr = email.utils.parseaddr(addr)[1]
     if not addr: return None
     for key in gpg.list_keys(secret):
@@ -596,9 +618,10 @@ class GPGMIME(PGPMIME):
 
     def __init__(self, gpg, default_key=None):
         "initialize with a gnupg instance and optionally a default_key (keyid,passphrase) tuple"
+        from six import string_types
         self.gpg = gpg
         if not default_key: pass
-        elif type(default_key)==str:
+        elif isinstance(default_key, string_types):
             defkey = self.find_key(default_key,secret=True)
             if defkey: default_key = defkey
         elif len(default_key)==2 and default_key[0]:
@@ -634,6 +657,21 @@ class GPGMIME(PGPMIME):
         If addr is a list or tuple, return a dict(addr:keyid) """
         return find_gnupg_key(self.gpg,addr,secret)
 
+    def pubkey_attachment(self,key=None): # pragma: no cover
+        "returns an attachment with the specified public key (default key if none specified)"
+        from email.mime.text import MIMEText
+        if not key:
+            key = self.default_key
+            if type(key)==tuple: key = key[0]
+        key = self.find_key(key) or key
+        pubkey = self.gpg.export_keys(key)
+        attach = MIMEText(pubkey)
+        attach.set_type("application/pgp-keys")
+        fname= key+'.asc'
+        attach.set_param('name',fname)
+        attach.add_header('Content-Disposition', 'attachment', filename=fname)
+        return attach
+
     def _sign_params(self, kwargs):
         if self.default_key and not 'default_key' in kwargs:
             kwargs['default_key'] = True
@@ -663,34 +701,6 @@ class GPGMIME(PGPMIME):
             result = self.gpg.verify_file(f)
             f.close()
         return result
-
-    @staticmethod
-    def without_signature(data):
-        "remove signature from string, if present"
-        if len(data)<=10: return data # no signature
-        firstline = data.splitlines()[0]
-        if firstline!='-----BEGIN PGP SIGNED MESSAGE-----':
-            return data # no signature
-        text = ''
-        for line in data.splitlines(True)[3:]: # remove first three lines
-            if line.rstrip()=='-----BEGIN PGP SIGNATURE-----': break
-            text += line
-        return text.rstrip()
-
-    def pubkey_attachment(self,key=None): # pragma: no cover
-        "returns an attachment with the specified public key (default key if none specified)"
-        from email.mime.text import MIMEText
-        if not key:
-            key = self.default_key
-            if type(key)==tuple: key = key[0]
-        key = self.find_key(key) or key
-        pubkey = self.gpg.export_keys(key)
-        attach = MIMEText(pubkey)
-        attach.set_type("application/pgp-keys")
-        fname= key+'.asc'
-        attach.set_param('name',fname)
-        attach.add_header('Content-Disposition', 'attachment', filename=fname)
-        return attach
 
     def _encrypt_params(self, recipients, kwargs):
         if 'sign' in kwargs:

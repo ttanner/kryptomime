@@ -18,37 +18,79 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
-def fix_lines(text,ending='\n',replace=True,final=False):
-    "fix line ending in text: 'replace' all or not, ensure 'final' line ending"
-    if not text or not ending: return text
+def fix_lines(text,linesep='\n',replace=True,final=False):
+    "fix line separators in text: 'replace' all or not, ensure 'final' line separator"
+    if not text or not linesep: return text
     if replace:
-        if ending=='\n':
+        if linesep=='\n':
             text = text.replace('\r\n','\n')
-        elif ending=='\r\n':
+        elif linesep=='\r\n':
             text = text.replace('\r\n','\n').replace('\n','\r\n')
     if not final: return text
-    return text.rstrip()+ending
+    return text.rstrip()+linesep
 
-from email.message import Message
+# workarounds for the totally broken Python email package
 
-class ProtectedMessage(Message):
-    "A Message object with specified line endings and which preserves the original header"
-    def __init__(self):
-        Message.__init__(self)
-        self.ending = None
-    def as_string(self, unixfrom=False):
-        return _mail_raw(self,unixfrom=unixfrom,ending=self.ending)
+import six
 
-def _mail_raw(mail,ending=None,unixfrom=False):
-    "workaround email problem (headers are left untouched only for multipart/signed but not its payloads)"
+if six.PY2:
+    from email.message import Message
     from email.generator import Generator
-    from six.moves import cStringIO
-    fp = cStringIO()
-    g = Generator(fp,maxheaderlen=0,mangle_from_=False)
-    g.flatten(mail,unixfrom)
-    s = fp.getvalue()
-    if ending: return fix_lines(s,ending=ending)
-    return s
+
+    class CharsetGenerator(Generator):
+
+        def __init__(self, outfp, mangle_from_=True, maxheaderlen=78, charset=None):
+            Generator.__init__(self, outfp, mangle_from_, maxheaderlen)
+            self.charset = charset
+
+        def _write_headers(self, msg): # pragma: no cover
+            for h, v in msg.items():
+                print >> self._fp, '%s:' % h,
+                if self._maxheaderlen == 0:
+                    # Explicit no-wrapping
+                    print >> self._fp, v
+                elif isinstance(v, Header):
+                    # Header instances know what to do
+                    print >> self._fp, v.encode()
+                elif _is8bitstring(v):
+                    # If we have raw 8bit data in a byte string, we have no idea
+                    # what the encoding is.  There is no safe way to split this
+                    # string.  If it's ascii-subset, then we could do a normal
+                    # ascii split, but if it's multibyte then we could break the
+                    # string.  There's no way to know so the least harm seems to
+                    # be to not split the string and risk it being too long.
+                    print >> self._fp, v
+                else:
+                    # Header's got lots of smarts, so use it.  Note that this is
+                    # fundamentally broken though because we lose idempotency when
+                    # the header string is continued with tabs.  It will now be
+                    # continued with spaces.  This was reversedly broken before we
+                    # fixed bug 1974.  Either way, we lose.
+                    print >> self._fp, Header(v, maxlinelen=self._maxheaderlen, 
+                        header_name=h, charset=self.charset).encode()
+            # A blank line always separates headers from body
+            print >> self._fp
+
+    class ProtectedMessage(Message):
+        "A Message object with specified line separators and which preserves the original header"
+
+        def __init__(self):
+            Message.__init__(self)
+            self._linesep = None
+
+        def as_string(self, unixfrom=False):
+            return _mail_raw(self,unixfrom=unixfrom,linesep=self._linesep,charset=self._charset)
+
+    def _mail_raw(mail,linesep=None,unixfrom=False,charset=None):
+        """work around email problem (headers are left untouched only
+        for multipart/signed but not its payloads)"""
+        from six.moves import cStringIO
+        fp = cStringIO()
+        g = CharsetGenerator(fp,maxheaderlen=0,mangle_from_=False,charset=charset)
+        g.flatten(mail,unixfrom)
+        s = fp.getvalue()
+        if linesep: return fix_lines(s,linesep=linesep)
+        return s
 
 def _mail_addreplace_header(msg,key,value):
     if key in msg: msg.replace_header(key,value)
@@ -59,73 +101,161 @@ def _mail_transfer_content(src,dest):
         if not key in src: continue
         _mail_addreplace_header(dest,key,src.get(key))
 
-def as_protected(txt,ending=None,headersonly=False):
+def get_linesep(mail): # autodetect CRLF or LF
+    i = mail.find('\n')
+    if i>0 and mail[i-1]=='\r': return '\r\n' #CRLF
+    return '\n' # default LF
+
+def as_protected(txt,linesep=None,headersonly=False,template=None):
     "convert txt to a protected message without modifying the subparts. only for internal use!"
-    from email.parser import HeaderParser, Parser
-    P = HeaderParser if headersonly else Parser
+    from email.parser import Parser
+    from email.message import Message
+
+    if six.PY3:
+        from email.policy import default
+        if isinstance(txt,Message):
+            if not headersonly:
+                if not linesep or linesep==txt.policy.linesep:
+                    import copy
+                    return copy.deepcopy(txt)
+                return protect_mail(txt,linesep)
+            txt = txt.as_string()
+        if not linesep: linesep = get_linesep(txt)
+        policy = default.clone(linesep=linesep)
+        if not template: template = Message
+        return Parser(policy=policy,_class=template).parsestr(txt,headersonly)
+
     if isinstance(txt,ProtectedMessage):
-        if (not ending or ending==txt.ending) and not headersonly:
+        if not headersonly and (not linesep or linesep==txt._linesep):
             import copy
             return copy.deepcopy(txt)
         txt = txt.as_string()
     elif isinstance(txt,Message): txt = _mail_raw(txt)
-    if not ending: # autodetect CRLF or LF
-        i = txt.find('\n')
-        if i>0 and txt[i-1]=='\r': ending='\r\n' #CRLF
-        else: ending='\n' # default LF
-    else: txt = fix_lines(txt,ending) # convert endings
-    mail = P(_class=ProtectedMessage).parsestr(txt)
-    mail.ending = ending
+    if not linesep: linesep = get_linesep(txt)
+    else: txt = fix_lines(txt,linesep) # convert lineseps
+    if not template: template = ProtectedMessage
+    from email.parser import HeaderParser
+    P = HeaderParser if headersonly else Parser
+    mail = P(_class=template).parsestr(txt)
+    mail._linesep = linesep
     return mail
 
-def protect_mail(mail,ending='\r\n',sevenbit=True):
+def protect_mail(mail,linesep='\r\n',sevenbit=True):
     "convert mail and subparts to ProtectedMessage, convert payloads to 7bit and CRLF"
+    from email.message import Message
     from email.parser import Parser
     from email.encoders import encode_quopri
-    import copy
+    import copy, six
 
-    def toseven(msg):
+    def to7bit(msg):
         try: msg.get_payload().encode('ascii')
         except UnicodeError: encode_quopri(msg)
         else:
             enc = 'Content-Transfer-Encoding'
             if not enc in msg: msg.add_header(enc,'7bit')
 
-    mail = as_protected(mail,ending=ending)
-    ending = mail.ending # get new or orignal endings
+    if six.PY3:
+        from email.policy import default
+        if not isinstance(mail,Message):
+            mail = as_protected(mail,linesep)
+            linesep = mail.policy.linesep
+        elif not linesep:
+            linesep = get_linesep(mail.as_string())
+        policy = default.clone(linesep=linesep,cte_type='7bit' if sevenbit else '8bit')
+        mail = copy.deepcopy(mail)
+        mail.policy = policy
+    else:
+        mail = as_protected(mail,linesep=linesep)
+        linesep = mail._linesep # get new or original lineseps
     if mail.is_multipart():
         converted = []
         for submsg in mail.get_payload():
             if submsg.is_multipart():
-                submsg = protect_mail(submsg,ending,sevenbit)
+                submsg = protect_mail(submsg,linesep,sevenbit)
             else:
-                if sevenbit: toseven(submsg)
-                submsg = as_protected(submsg,ending=ending)
+                if sevenbit: to7bit(submsg)
+                submsg = as_protected(submsg,linesep=linesep)
             converted.append(submsg)
         mail.set_payload(None)
         for submsg in converted: mail.attach(submsg)
     else:
-        if sevenbit: toseven(mail)
-        mail.set_payload(fix_lines(mail.get_payload(),ending=ending))
+        if sevenbit: to7bit(mail)
+        mail.set_payload(fix_lines(mail.get_payload(),linesep=linesep))
     return mail
 
-def create_mail(sender,to,subject,body,cc='',attach=None,time=None,headers={}):
+def check_charset(s, charset=None, use_locale=True):
+    from six import PY3
+    from locale import getpreferredencoding
+    import codecs
+    # work around gnupg workaround :/
+    codecs.register_error('strict', codecs.strict_errors)
+    if PY3:
+        if charset:
+            s.encode(charset)
+            return s, charset
+        try: return check_charset(s, 'us-ascii')
+        except UnicodeEncodeError: pass
+        if use_locale: # pragma: no cover
+            charset = getpreferredencoding(True)
+            try: return check_charset(s, charset)
+            except UnicodeEncodeError: pass
+        return check_charset(s, 'UTF-8')
+    if type(s)==unicode:
+        if charset:
+            return s.encode(charset), charset
+        charset = 'us-ascii'
+        try: return s.encode(charset), charset
+        except UnicodeEncodeError: pass
+        if use_locale: # pragma: no cover
+            charset = getpreferredencoding(True)
+            try: return s.encode(charset), charset
+            except UnicodeEncodeError: pass
+        charset = 'UTF-8'
+        return s.encode(charset), charset
+    if charset:
+        s.decode(charset)
+        return s, charset
+    charset = 'us-ascii'
+    try:
+        s.decode(charset)
+        return s, charset
+    except UnicodeDecodeError: pass
+    if use_locale:
+        charset = getpreferredencoding(True)
+        try:
+            s.decode(charset)
+            return s, charset
+        except UnicodeDecodeError: pass
+    charset = 'UTF-8'
+    s.decode(charset)
+    return s, charset
+
+def create_mail(sender,to,subject,body,cc=None,bcc=None,
+    attach=None,time=None,headers={},charset=None):
     """create an email with sender 'sender', receivers 'to', subject and body,
-     optional CC, attachments, extra headers and time"""
+     optional CC, BCC, attachments, extra headers and time"""
     import email.mime.text, email.mime.multipart, email.utils
     import time as time_mod
     from six import iteritems
-    msg = email.mime.text.MIMEText(fix_lines(body,replace=False))
+    def set_header(msg,key,value,charset):
+        from email.header import Header
+        value, charset = check_charset(value, charset)
+        msg[key] = value if charset=='us-ascii' else str(Header(value, charset))
+
+    body = fix_lines(body,replace=False)
+    body, bcharset = check_charset(body,charset)
+    msg = email.mime.text.MIMEText(body,_charset=bcharset)
     if not attach is None:
         mmsg = email.mime.multipart.MIMEMultipart()
         mmsg.attach(msg)
         for msg in attach: mmsg.attach(msg)
         msg = mmsg
-    msg.set_unixfrom(sender)
-    msg['From'] = sender
-    msg['To'] = to
-    if cc: msg['CC'] = cc
-    msg['Subject'] = subject
+    msg.set_unixfrom(email.utils.parseaddr(sender)[1])
+    set_header(msg,'From',sender,charset)
+    set_header(msg,'To',to,charset)
+    if cc: set_header(msg,'CC',cc,charset)
+    if bcc: set_header(msg,'BCC',bcc,charset)
+    set_header(msg,'Subject',subject,charset)
     if not time: time = time_mod.time()
     msg['Date'] = email.utils.formatdate(time,localtime=True)
     for k, v in iteritems(headers):
@@ -136,72 +266,3 @@ def create_mail(sender,to,subject,body,cc='',attach=None,time=None,headers={}):
         else:
             msg.add_header(k,v)
     return msg
-
-class KryptoMIME(object):
-    def __init__(self, default_key=None):
-        self.default_key = default_key
-
-    def analyze(self,mail):
-        """Checks whether the email is encrypted or signed.
-
-        :param mail: A string or email
-        :returns: Whether the email is encrypted and whether it is signed (if it is not encrypted).
-        :rtype: (bool,bool/None)
-        """
-        raise NotImplementedError
-
-    def strip_signature(self,mail):
-        """Returns the raw email without signature. Does not check for valid signature.
-
-        :param mail: A string or email
-        :returns: An email without signature and whether the input was signed
-        :rtype: (Message,bool)
-        """
-        raise NotImplementedError
-
-    def verify(self, mail, **kwargs):
-        """Verifies the validity of the signature of an email.
-
-        :type mail: string or Message object
-        :param mail: A string or email
-        :returns: whether the input was signed by the sender and detailed results
-        :rtype: (bool,dict)
-        """
-        raise NotImplementedError
-
-    def decrypt(self, mail, **kwargs):
-        """Decrypts and verifies an email.
-
-        :param mail: A string or email
-        :type mail: string or Message object
-        :returns: An email without signature (None if the decryption failed),
-             whether the input was signed by the sender and detailed results
-        :rtype: (Message,bool,dict)
-        """
-        raise NotImplementedError
-
-    def sign(self, mail, verify=True, **kwargs):
-        """Signs an email with the sender's (From) signature.
-
-        :param mail: A string or email
-        :type mail: string or Message object
-        :param verify: Whether to verify the signed mail immediately
-        :type verify: bool
-        :returns: The signed email (None if it fails) and the sign details.
-        :rtype: (Message,dict)
-        """
-        raise NotImplementedError
-
-    def encrypt(self, mail, sign=True, verify=False, **kwargs):
-        """Encrypts an email for the recipients in To/CC.
-
-        :param mail: A string or email
-        :type mail: string or Message object
-        :param sign: Whether to sign the mail with the sender's (From) signature
-        :type sign: bool
-        :param verify: Whether to verify the encrypted mail immediately
-        :type verify: bool
-        :returns: The encrypted email (None if it fails) and the encryption details.
-        :rtype: (Message,dict)
-        """
-        raise NotImplementedError

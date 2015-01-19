@@ -1,3 +1,11 @@
+v0.5.0, xx.01.2015
+------------------
+- create_mail has new BCC and charset parameters
+- full support for unicode and other charsets
+- backwards incompatible change: ending renamed to linesep in protect_mail
+- use policies for Python3 and improved Python3 support
+- more coverage
+
 v0.4.1, 10.12.2014
 ------------------
 - minor Python 3 compatibility fix

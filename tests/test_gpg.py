@@ -27,24 +27,19 @@ from kryptomime.pgp import find_gnupg_key
 import gnupg, email.mime.text
 
 """
-TODO:
-exotic mails: 'multipart/encrypted' but single-part, text/plain but encrypted, 'multipart/mixed' by signed
-input mail as str
-all line endings
-default key =false or true&missing
+TODO: 'multipart/encrypted' but single-part, text/plain but encrypted, 'multipart/mixed' but signed
 """
+from conftest import sender, receiver
 
-sender='foo@localhost'
 passphrase='mysecret'
-receiver='bar@localhost'
 attachment = email.mime.text.MIMEText('some\nattachment')
 msg = create_mail(sender,receiver,'subject','body\nmessage')
 msg.epilogue=''
 msgatt = create_mail(sender,receiver,'subject','body\nmessage',attach=[attachment])
 msgrev = create_mail(receiver,sender,'subject','body\nmessage')
 msgself = create_mail(sender,sender,'subject','body\nmessage')
-prot = protect_mail(msg,ending='\r\n')
-protatt = protect_mail(msgatt,ending='\r\n')
+prot = protect_mail(msg,linesep='\r\n')
+protatt = protect_mail(msgatt,linesep='\r\n')
 
 def mktmp():
     import tempfile
@@ -54,9 +49,9 @@ def mktmp():
     return name
 
 def compare_mail(a,b):
-    from kryptomime.mail import ProtectedMessage
     if type(a)==str: return a==b
     assert a.is_multipart() == b.is_multipart()
+    #from kryptomime.mail import ProtectedMessage
     #assert isinstance(a,ProtectedMessage)==isinstance(b,ProtectedMessage)
     # todo headers
     if a.is_multipart():
@@ -73,32 +68,50 @@ def keys(request):
     generate = request.config.getoption('generate')
     verbose = request.config.getoption('gpglog')
     if verbose: gnupg._logger.create_logger(10)
-    if generate:
-        keyrings = [mktmp() for i in range(2)]
-        secrings = [mktmp() for i in range(2)]
-    else:
-        home = os.path.dirname(os.path.abspath(__file__))
-        keyrings = [os.path.join(home,'keyring%i'%i) for i in range(2)]
-        secrings = [os.path.join(home,'secring%i'%i) for i in range(2)]
+    keyrings = [mktmp() for i in range(2)]
+    secrings = [mktmp() for i in range(2)]
+    home = os.path.dirname(os.path.abspath(__file__))
+    fpubkey = [os.path.join(home,'pubkey%i.asc'%(i+1)) for i in range(2)]
+    fseckey = [os.path.join(home,'seckey%i.asc'%(i+1)) for i in range(2)]
     keygen = generate
     if not keygen:
-        for fname in keyrings+secrings:
+        for fname in fpubkey+fseckey:
             if os.path.exists(fname): continue
             keygen = True
             break
     if keygen:
-        for fname in keyrings+secrings:
+        for fname in fpubkey+fseckey:
             if os.path.exists(fname): os.unlink(fname)
     gpg1 = gnupg.GPG(keyring=keyrings[0],secring=secrings[0],verbose=verbose,use_agent=False)
     gpg2 = gnupg.GPG(keyring=keyrings[1],secring=secrings[1],verbose=verbose,use_agent=False)
     if keygen:
-        key1 = gpg1.gen_key(gpg1.gen_key_input(name_email=sender,key_length=1024,passphrase=passphrase)).fingerprint
-        key2 = gpg2.gen_key(gpg2.gen_key_input(name_email=receiver,key_length=1024)).fingerprint
+        print ('generating keys')
+        key1 = gpg1.gen_key(gpg1.gen_key_input(name_email=sender,key_length=1024,
+            passphrase=passphrase,expire_date='0'))
+        key2 = gpg2.gen_key(gpg2.gen_key_input(name_email=receiver,key_length=1024,
+            expire_date='0'))
+        assert key1 and key2
+        key1, key2 = key1.fingerprint, key2.fingerprint
+        pubkey1= gpg1.export_keys(key1)
+        pubkey2= gpg2.export_keys(key2)
+        open(fpubkey[0],'wt').write(pubkey1)
+        open(fpubkey[1],'wt').write(pubkey2)
+        seckey1= gpg1.export_keys(key1,secret=True)
+        seckey2= gpg2.export_keys(key2,secret=True)
+        open(fseckey[0],'wt').write(seckey1)
+        open(fseckey[1],'wt').write(seckey2)
     else:
+        pubkey1 = open(fpubkey[0],'rt').read()
+        pubkey2 = open(fpubkey[1],'rt').read()
+        gpg1.import_keys(pubkey1)
+        gpg2.import_keys(pubkey2)
+        seckey1 = open(fseckey[0],'rt').read()
+        seckey2 = open(fseckey[1],'rt').read()
+        gpg1.import_keys(seckey1)
+        gpg2.import_keys(seckey2)
         key1 = find_gnupg_key(gpg1,sender)
         key2 = find_gnupg_key(gpg2,receiver)
-    pubkey1= gpg1.export_keys(key1)
-    pubkey2= gpg2.export_keys(key2)
+        assert key1 and key2
     def fin():
         for tmp in keyrings+secrings: os.unlink(tmp)
     if generate: request.addfinalizer(fin)
@@ -114,100 +127,95 @@ def gpgreceiver(keys):
 
 def print_mail(m):
     from kryptomime.mail import ProtectedMessage
-    print ('main', repr(m.ending) if isinstance(m,ProtectedMessage) else '')
+    print ('main', repr(m._linesep) if isinstance(m,ProtectedMessage) else '')
     print (repr(m.as_string()))
     if m.is_multipart():
         for i, sub in enumerate(m.get_payload()):
-            print ('part',i, repr(sub.ending) if isinstance(sub,ProtectedMessage) else '')
+            print ('part',i, repr(sub._linesep) if isinstance(sub,ProtectedMessage) else '')
             print (repr(sub.as_string()))
             print (repr(sub.get_payload()))
     else:
         print (repr(m.get_payload()))
 
-def test_sign(gpgsender):
+@mark.parametrize("variant", range(16))
+def test_sign(gpgsender,variant):
     # protect = use protected CRLF message
     import copy
-    def sub(inline,attach,asstr,protect):
-        global prot, protatt
-        if attach: # with attachment
-            nmsg, pmsg = protect_mail(msgatt,ending='\n'), protatt
-            inmsg = protatt if protect else nmsg
-        else:
-            inmsg = prot if protect else msg
-            nmsg, pmsg = msg, prot
-        if asstr: inmsg, nmsg, pmsg = inmsg.as_string(), nmsg.as_string(), pmsg.as_string()
-        omsg = copy.deepcopy(inmsg)
-        sgn, result = gpgsender.sign(inmsg,inline=inline,verify=True)
-        assert sgn
-        compare_mail(omsg,inmsg) # unmodified
-        if inline:
-            assert not sgn.is_multipart()
-            body = gpgsender.without_signature(sgn.get_payload())
-            if not asstr: assert body==pmsg.get_payload()
-        if asstr: sgn = sgn.as_string()
-        if protect: sgn = protect_mail(sgn,ending='\r\n')
-        osgn = copy.deepcopy(sgn)
-        assert gpgsender.verify(sgn,strict=True)[0]
-        compare_mail(osgn,sgn) # unmodified
-        msg2, signed, results = gpgsender.decrypt(sgn,strict=True)
-        assert signed and msg2
-        compare_mail(osgn,sgn) # unmodified
-        if asstr: msg2 = msg2.as_string()
-        compare_mail(pmsg,msg2)
+    inline,attach,asstr,protect=variant&8,variant&4,variant&2,variant&1
+    if inline and attach: return
 
-        assert gpgsender.verify(sgn,strict=False)[0]
-        compare_mail(osgn,sgn) # unmodified
-        msg2, signed, results = gpgsender.decrypt(sgn,strict=False)
-        assert signed and msg2
-        compare_mail(osgn,sgn) # unmodified
-        if asstr: msg2 = msg2.as_string()
-        compare_mail(pmsg,msg2)
+    global prot, protatt
+    if attach: # with attachment
+        nmsg, pmsg = protect_mail(msgatt,linesep='\n'), protatt
+        inmsg = protatt if protect else nmsg
+    else:
+        inmsg = prot if protect else msg
+        nmsg, pmsg = msg, prot
+    if asstr: inmsg, nmsg, pmsg = inmsg.as_string(), nmsg.as_string(), pmsg.as_string()
+    omsg = copy.deepcopy(inmsg)
+    sgn, result = gpgsender.sign(inmsg,inline=inline,verify=True)
+    assert sgn
+    compare_mail(omsg,inmsg) # unmodified
+    if inline:
+        assert not sgn.is_multipart()
+        body = gpgsender.without_signature(sgn.get_payload())
+        if not asstr: assert body==pmsg.get_payload()
+    if asstr: sgn = sgn.as_string()
+    if protect: sgn = protect_mail(sgn,linesep='\r\n')
+    osgn = copy.deepcopy(sgn)
+    assert gpgsender.verify(sgn,strict=True)[0]
+    compare_mail(osgn,sgn) # unmodified
+    msg2, signed, results = gpgsender.decrypt(sgn,strict=True)
+    assert signed and msg2
+    compare_mail(osgn,sgn) # unmodified
+    if asstr: msg2 = msg2.as_string()
+    compare_mail(pmsg,msg2)
 
-        nsgn = protect_mail(sgn,ending='\n') # use LF message as input
-        if asstr: nsgn = nsgn.as_string()
-        compare_mail(osgn,sgn) # unmodified
-        onsgn = copy.deepcopy(nsgn)
-        msg2, signed, results = gpgsender.decrypt(nsgn,strict=True)
-        assert signed==inline and msg2 # sgn was modified, should fail for detached
-        compare_mail(onsgn,nsgn) # unmodified
-        if asstr: msg2 = msg2.as_string()
+    assert gpgsender.verify(sgn,strict=False)[0]
+    compare_mail(osgn,sgn) # unmodified
+    msg2, signed, results = gpgsender.decrypt(sgn,strict=False)
+    assert signed and msg2
+    compare_mail(osgn,sgn) # unmodified
+    if asstr: msg2 = msg2.as_string()
+    compare_mail(pmsg,msg2)
+
+    nsgn = protect_mail(sgn,linesep='\n') # use LF message as input
+    if asstr: nsgn = nsgn.as_string()
+    compare_mail(osgn,sgn) # unmodified
+    onsgn = copy.deepcopy(nsgn)
+    msg2, signed, results = gpgsender.decrypt(nsgn,strict=True)
+    assert signed==bool(inline) and msg2 # sgn was modified, should fail for detached
+    compare_mail(onsgn,nsgn) # unmodified
+    if asstr: msg2 = msg2.as_string()
+    compare_mail(nmsg,msg2)
+
+    msg2, signed, results = gpgsender.decrypt(nsgn,strict=False)
+    assert signed and msg2
+    compare_mail(onsgn,nsgn)
+    if asstr: msg2 = msg2.as_string()
+    if inline:
         compare_mail(nmsg,msg2)
+    else:
+        compare_mail(pmsg,msg2)
 
-        msg2, signed, results = gpgsender.decrypt(nsgn,strict=False)
-        assert signed and msg2
-        compare_mail(onsgn,nsgn)
-        if asstr: msg2 = msg2.as_string()
-        if inline:
-            compare_mail(nmsg,msg2)
-        else:
-            compare_mail(pmsg,msg2)
-
-    for i in range(16):
-        inline,attach,asstr,protect=i&8,i&4,i&2,i&1
-        if inline and attach: continue
-        sub(bool(inline),attach,asstr,protect)
-
-def test_encrypt(gpgsender):
+@mark.parametrize("variant", range(4))
+def test_encrypt(gpgsender,variant):
     import copy
-    def sub(asstr,protect):
-        inmsg = protect_mail(msgrev,ending='\r\n') if protect else msgrev
-        if asstr: inmsg = inmsg.as_string()
-        omsg = copy.deepcopy(inmsg)
-        enc, results = gpgsender.encrypt(inmsg,toself=False,sign=False) # we only know sender keys
-        assert enc
-        compare_mail(omsg,inmsg)
-        if protect: enc = protect_mail(enc,ending='\r\n')
-        if asstr: enc = enc.as_string()
-        oenc = copy.deepcopy(enc)
-        msg2, signed, results = gpgsender.decrypt(enc,strict=True)
-        assert not signed and msg2
-        compare_mail(oenc,enc)
-        if asstr: msg2 = msg2.as_string()
-        compare_mail(inmsg,msg2)
-
-    for i in range(4):
-        asstr,protect=i&2,i&1
-        sub(asstr,protect)
+    asstr,protect=variant&2,variant&1
+    inmsg = protect_mail(msgrev,linesep='\r\n') if protect else msgrev
+    if asstr: inmsg = inmsg.as_string()
+    omsg = copy.deepcopy(inmsg)
+    enc, results = gpgsender.encrypt(inmsg,toself=False,sign=False) # we only know sender keys
+    assert enc
+    compare_mail(omsg,inmsg)
+    if protect: enc = protect_mail(enc,linesep='\r\n')
+    if asstr: enc = enc.as_string()
+    oenc = copy.deepcopy(enc)
+    msg2, signed, results = gpgsender.decrypt(enc,strict=True)
+    assert not signed and msg2
+    compare_mail(oenc,enc)
+    if asstr: msg2 = msg2.as_string()
+    compare_mail(inmsg,msg2)
 
 def test_unknown_sign(gpgreceiver):
     # bad sign
@@ -264,7 +272,7 @@ class TestUnilateral:
     def test_sender_signed_nl(self,unilateral,gpgreceiver):
         # good self sign
         id1, id2, sgn = unilateral['id'], gpgreceiver, unilateral['sgn']
-        sgn = protect_mail(sgn,ending='\n')
+        sgn = protect_mail(sgn,linesep='\n')
         raw, verified, result1 = id1.decrypt(sgn,strict=False)
         verified2, result2 = id1.verify(sgn,strict=False)
         assert raw and result1 and result2
@@ -343,7 +351,7 @@ class TestBilateral:
 
     def sign(self,ids,msg,inline):
         id1, id2 = ids['id1'], ids['id2']
-        prot = protect_mail(msg,ending='\r\n')
+        prot = protect_mail(msg,linesep='\r\n')
         sgn,_ = id1.sign(msg,inline=inline)
         assert sgn and id2.analyze(sgn) == (False,True)
         mail, verified, result1 = id2.decrypt(sgn)
@@ -362,6 +370,14 @@ class TestBilateral:
     def test_sign_attach(self,bilateral):
         self.sign(bilateral, msgatt, inline=False)
 
+    def test_uni_sign_attach(self,bilateral):
+        usender = sender.replace('Foo','Föo')
+        ureceiver = receiver.replace('Bar','Bär')
+        attachment = email.mime.text.MIMEText(u'söme\nattachment',_charset='utf-8')
+        msgatt = create_mail(usender,ureceiver,u'sübject',u'bödy\nmessage',
+            attach=[attachment],charset='utf-8')
+        self.sign(bilateral, msgatt, inline=False)
+
     def test_sign_inline(self,bilateral):
         self.sign(bilateral, msg, inline=True)
 
@@ -372,6 +388,14 @@ class TestBilateral:
         self.encrypt(bilateral, msg, sign=False, inline=False)
 
     def test_encrypt_attach(self,bilateral):
+        self.encrypt(bilateral, msgatt, sign=False, inline=False)
+
+    def test_uni_encrypt_attach(self,bilateral):
+        usender = sender.replace('Foo','Föo')
+        ureceiver = receiver.replace('Bar','Bär')
+        attachment = email.mime.text.MIMEText(u'söme\nattachment',_charset='utf-8')
+        msgatt = create_mail(usender,ureceiver,u'sübject',u'bödy\nmessage',
+            attach=[attachment],charset='utf-8')
         self.encrypt(bilateral, msgatt, sign=False, inline=False)
 
     def test_encrypt_inline(self,bilateral):
@@ -387,7 +411,7 @@ class TestBilateral:
         self.encrypt(bilateral, msg, sign=True, inline=True)
 
     def test_no_defkey(self,bilateral):
-        # missing defkekf, cannot sign
+        # missing defkey, cannot sign
         id1 = GPGMIME(bilateral['gpg1'])
         assert id1.sign(msg)[0] is None
         assert id1.encrypt(msg,sign=True)[0] is None
@@ -395,6 +419,16 @@ class TestBilateral:
         enc = bilateral['id2'].encrypt(msgrev)[0]
         assert enc
         with raises(KeyMissingError): id1.decrypt(enc)
+
+    def test_no_defkey2(self,bilateral):
+        # missing defkey, cannot sign
+        id1 = GPGMIME(bilateral['gpg1'])
+        with raises(KeyMissingError): id1.sign(msg,default_key=False)
+        with raises(KeyMissingError): id1.encrypt(msg,sign=True,default_key=False)
+        # no receiver key, cannot decrypt
+        enc = bilateral['id2'].encrypt(msgrev)[0]
+        assert enc
+        with raises(KeyMissingError): id1.decrypt(enc,default_key=False)
 
     def test_bad_passphrase(self,bilateral):
         # bad sender passphrase, cannot sign
@@ -417,7 +451,7 @@ class TestBilateral:
     def bad_sign(self,ids,receiver,msg,encrypt):
         # id1 signs, but id2 doesn't know id1
         id1, id2 = ids['id1'], receiver
-        prot = protect_mail(msg,ending='\r\n')
+        prot = protect_mail(msg,linesep='\r\n')
         if encrypt: out,_ = id1.encrypt(msg,sign=True)
         else: out,_ = id1.sign(msg)
         assert out

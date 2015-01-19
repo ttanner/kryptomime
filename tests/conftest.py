@@ -1,3 +1,6 @@
+sender='Foo <foo@localhost>'
+passphrase='mysecret'
+receiver='Bar <bar@localhost>'
 
 def pytest_addoption(parser):
     parser.addoption("--generate", action="store_true", help="generate PGP keys")
