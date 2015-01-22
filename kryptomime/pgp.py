@@ -330,59 +330,7 @@ class PGPMIME(KryptoMIME):
         which breaks the signature. With strict=False it is also checked, whether the signature would
         be valid after conversion to full CR/LF or LF.
         """
-        results = {'encrypted':False,'decryption':None,'signed':False,
-                    'fingerprints':[],'key_ids':[],'results':[]}
-        # possible encryptions: nothing,only signed, encrypted+signed, encrypted after signed 
-        from email.message import Message
-        import email.utils
-        from .mail import protect_mail
-        if type(mail)==str: mail = protect_mail(mail,linesep=None)
-        elif not isinstance(mail,Message): return False, results
-        from email.header import decode_header
-        sender = mail.get('from', [])
-        sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
-        sender = self.find_key(sender)
-        if not valid_keys:
-            valid_keys = [sender]
-        else:
-            valid_keys = [self.find_key(keyid) for keyid in valid_keys]
-        ciphertext, is_pgpmime = self._ciphertext(mail)
-        if ciphertext: # Ciphertext present?
-            results['encrypted'] = True
-            if not 'default_key' in kwargs:
-                if not self.default_key: raise KeyMissingError("default")
-                tos = mail.get_all('to', []) + mail.get_all('cc', [])
-                receiver = None
-                for to in tos:
-                    receiver = self.find_key( email.utils.parseaddr(decode_header(to)[0][0])[1] )
-                    if receiver: break
-                if not receiver:
-                    raise KeyMissingError("receiver")
-                kwargs['default_key'] = receiver
-            elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
-                raise KeyMissingError("default")
-            ciphertext = self._fix_quoting(ciphertext)
-            result = self.decrypt_str(ciphertext, **kwargs)
-            results['decryption'] = result
-            if not result.ok:
-                results['signed'] = None # unknown
-                return False, results # cannot decrypt
-            if result.key_id: results['signed'] = True
-            if result.valid:
-                results['fingerprints'] = [result.fingerprint]
-                results['key_ids'] = [result.key_id]
-                results['results'] = [result]
-                if result.fingerprint in valid_keys: return True, results
-            plaintext = str(result)
-            mail = self._decoded(mail,plaintext,is_pgpmime)
-        payload, signatures, rawmail = self._signature(mail)
-        if not payload: return False, results # no plain msg
-        rawmail, sresults = self._check_signatures(payload, signatures, rawmail, strict=strict)
-        if sresults['signed']: results['signed'] = True
-        results['fingerprints'].extend(sresults['fingerprints'])
-        results['key_ids'].extend(sresults['key_ids'])
-        results['results'].extend(sresults['results'])
-        valid = results['signed'] and len(set(valid_keys).intersection(results['fingerprints']))
+        mail, valid, results = self.decrypt(mail,strict,valid_keys, **kwargs)
         return valid, results
 
     def decrypt(self, mail, strict=False, valid_keys=[], **kwargs):
@@ -474,65 +422,7 @@ class PGPMIME(KryptoMIME):
         :returns: The signed email (None if it fails) and the sign details.
         :rtype: (Message,dict)
         """
-        from email.message import Message
-        from .mail import protect_mail, as_protected
-        from six import string_types, PY3
-        if not isinstance(mail,(Message,)+string_types):
-            raise TypeError("mail must be Message or str")
-        mail = protect_mail(mail,linesep='\r\n',sevenbit=True) # fix line separators + 7bit RFC2822
-        if not 'default_key' in kwargs:
-            import email.utils
-            from email.header import decode_header
-            sender = mail.get('from', [])
-            sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
-            sender = self.find_key(sender,secret=True)
-            if not sender:
-                raise KeyMissingError("sender")
-            kwargs['default_key'] = sender
-        elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
-            raise KeyMissingError("default")
-        plaintext, submsg = self._plaintext(mail, inline)
-        # Generate signature, report errors
-        try:
-            if not mail.is_multipart() and inline:
-                result = self.sign_str(plaintext, clearsign=True, detach=False, **kwargs)
-            else:
-                result = self.sign_str(plaintext, clearsign=False, detach=True, **kwargs)
-        except: result = None
-        if not result: return None, result
-        signature = str(result)
-        # Compile signed message
-        #_mail_addreplace_header(mail,'Content-Transfer-Encoding','7bit')
-        if not mail.is_multipart() and inline:
-            mail.set_payload(signature)
-            mail.set_param('x-action','pgp-signed')
-            if verify:
-                vresult = self.verify_str(signature)
-                if not vresult.valid: return None, result
-        else:
-            # workaround to preserve header order
-            tmp = Message()
-            tmp['Content-Type'] = mail['Content-Type']
-            tmp.set_type('multipart/signed')
-            tmp.del_param('boundary') # delete boundary as we need a new one
-            tmp.set_param('protocol','application/pgp-signature')
-            tmp.set_param('micalg','pgp-sha1;')
-            mail.replace_header('Content-Type',tmp['Content-Type'])
-            if PY3: mail = as_protected(mail,headersonly=True)
-            mail.set_payload(None)
-            mail.preamble = 'This is an OpenPGP/MIME signed message (RFC 4880 and 3156)'
-            assert submsg.as_string()==plaintext, "plaintext was broken"
-            mail.attach(submsg)
-            submsg = Message()
-            submsg.add_header('Content-Type','application/pgp-signature; name="signature.asc"')
-            submsg.add_header('Content-Description', 'OpenPGP digital signature')
-            submsg.add_header('Content-Disposition','attachment; filename="signature.asc"')
-            submsg.set_payload(signature)
-            mail.attach(submsg)
-            if verify:
-                vresult = self.verify_str(mail.get_payload(0).as_string(),signature)
-                if not vresult.valid: return None, result
-        return mail, result
+        return self._encrypt(mail, encrypt=False, sign=True, inline=inline, verify=verify, **kwargs)
 
     def encrypt(self, mail, sign=True, inline=False, recipients=None, toself=True, verify=False, **kwargs):
         """Encrypts an email for the recipients and optionally signs it.
@@ -552,72 +442,128 @@ class PGPMIME(KryptoMIME):
         :returns: The encrypted email (None if it fails) and the encryption details.
         :rtype: (Message,dict)
         """
+        return self._encrypt(mail, encrypt=True, sign=sign, inline=inline, recipients=recipients,
+             toself=toself, verify=verify, **kwargs)
+
+    def _encrypt(self, mail, encrypt=True, sign=True, inline=False, recipients=None, toself=True, verify=False, **kwargs):
         import email.utils, six
         from email.header import decode_header
         from email.message import Message
         from .mail import _mail_addreplace_header, protect_mail, as_protected
-        mail = protect_mail(mail,linesep=None)
-        if not recipients:
-            tos = mail.get_all('to', []) + mail.get_all('cc', [])
-            recipients = [self.find_key( email.utils.parseaddr(decode_header(to)[0][0])[1] ) for to in tos]
+        if not isinstance(mail,(Message,)+six.string_types):
+            raise TypeError("mail must be Message or str")
+        if encrypt:
+            mail = protect_mail(mail,linesep=None)
+            if not recipients:
+                tos = mail.get_all('to', []) + mail.get_all('cc', [])
+                recipients = [self.find_key( email.utils.parseaddr(decode_header(to)[0][0])[1] ) for to in tos]
+            else:
+                recipients = [self.find_key( keyid ) for keyid in recipients]
+            if None in recipients:
+                raise KeyMissingError("recipients")
+            if toself or sign:
+                sender = mail.get('from', [])
+                sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
+                senderkey = self.find_key(sender,secret=True)
+                if not senderkey:
+                    raise KeyMissingError("sender")
+                if toself:
+                    if not senderkey in recipients: recipients.append(senderkey)
+            if sign:
+                if not 'default_key' in kwargs:
+                    kwargs['default_key'] = senderkey
+                elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
+                    raise KeyMissingError("default")
         else:
-            recipients = [self.find_key( keyid ) for keyid in recipients]
-        if None in recipients:
-            raise KeyMissingError("recipients")
-        if toself or sign:
-            sender = mail.get('from', [])
-            sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
-            senderkey = self.find_key(sender,secret=True)
-            if not senderkey:
-                raise KeyMissingError("sender")
-            if toself:
-                if not senderkey in recipients: recipients.append(senderkey)
-        if sign:
+            mail = protect_mail(mail,linesep='\r\n',sevenbit=True) # fix line separators + 7bit RFC2822
             if not 'default_key' in kwargs:
-                kwargs['default_key'] = senderkey
+                import email.utils
+                from email.header import decode_header
+                sender = mail.get('from', [])
+                sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
+                sender = self.find_key(sender,secret=True)
+                if not sender:
+                    raise KeyMissingError("sender")
+                kwargs['default_key'] = sender
             elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
                 raise KeyMissingError("default")
         plaintext, submsg = self._plaintext(mail, inline)
-        # Do encryption, report errors
-        kwargs['sign'] = sign
-        kwargs['armor'] = True
-        try:
-            result = self.encrypt_str(plaintext, recipients, **kwargs)
-        except: result = None
-        if not result: return None, result
-        ciphertext = str(result)
-        if verify and toself:
-            del kwargs['sign']
-            del kwargs['armor']
-            if not 'default_key' in kwargs:
-                kwargs['default_key'] = senderkey
-            vresult = self.decrypt_str(ciphertext, **kwargs)
-            if not vresult.ok or (sign and not vresult.valid): return None, result
+        if encrypt:
+            # Do encryption, report errors
+            kwargs['sign'] = sign
+            kwargs['armor'] = True
+            try:
+                result = self.encrypt_str(plaintext, recipients, **kwargs)
+            except: result = None
+            if not result: return None, result
+            payload = str(result)
+            if verify and toself:
+                del kwargs['sign']
+                del kwargs['armor']
+                if not 'default_key' in kwargs:
+                    kwargs['default_key'] = senderkey
+                vresult = self.decrypt_str(payload, **kwargs)
+                if not vresult.ok or (sign and not vresult.valid): return None, result
+        else:
+            # Generate signature, report errors
+            try:
+                if not mail.is_multipart() and inline:
+                    result = self.sign_str(plaintext, clearsign=True, detach=False, **kwargs)
+                else:
+                    result = self.sign_str(plaintext, clearsign=False, detach=True, **kwargs)
+            except: result = None
+            if not result: return None, result
+            payload = str(result) #signature
         # Compile encrypted message
         if not mail.is_multipart() and inline:
-            _mail_addreplace_header(mail,'Content-Transfer-Encoding','7bit')
-            mail.set_payload(ciphertext)
-            mail.set_param('x-action','pgp-encrypted')
+            mail.set_payload(payload)
+            if encrypt:
+                _mail_addreplace_header(mail,'Content-Transfer-Encoding','7bit')
+                mail.set_param('x-action','pgp-encrypted')
+            else:
+                mail.set_param('x-action','pgp-signed')
+                if verify:
+                    vresult = self.verify_str(payload)
+                    if not vresult.valid: return None, result
         else:
             # workaround to preserve header order
             tmp = Message()
             tmp['Content-Type'] = mail['Content-Type']
-            tmp.set_type('multipart/encrypted')
-            tmp.set_param('protocol','application/pgp-encrypted')
+            if encrypt:
+                tmp.set_type('multipart/encrypted')
+                tmp.set_param('protocol','application/pgp-encrypted')
+            else:
+                tmp.set_type('multipart/signed')
+                tmp.del_param('boundary') # delete boundary as we need a new one
+                tmp.set_param('protocol','application/pgp-signature')
+                tmp.set_param('micalg','pgp-sha1;')
             mail.replace_header('Content-Type',tmp['Content-Type'])
             if six.PY3: mail = as_protected(mail,headersonly=True)
             mail.preamble = 'This is an OpenPGP/MIME signed message (RFC 4880 and 3156)'
             mail.set_payload(None)
-            submsg = Message()
-            submsg.add_header('Content-Type','application/pgp-encrypted')
-            submsg.set_payload('Version: 1\n')
-            mail.attach(submsg)
-            submsg = Message()
-            submsg.add_header('Content-Type','application/octet-stream; name="encrypted.asc"')
-            submsg.add_header('Content-Description', 'OpenPGP encrypted message')
-            submsg.add_header('Content-Disposition','inline; filename="encrypted.asc"')
-            submsg.set_payload(ciphertext)
-            mail.attach(submsg)
+            if encrypt:
+                submsg = Message()
+                submsg.add_header('Content-Type','application/pgp-encrypted')
+                submsg.set_payload('Version: 1\n')
+                mail.attach(submsg)
+                submsg = Message()
+                submsg.add_header('Content-Type','application/octet-stream; name="encrypted.asc"')
+                submsg.add_header('Content-Description', 'OpenPGP encrypted message')
+                submsg.add_header('Content-Disposition','inline; filename="encrypted.asc"')
+                submsg.set_payload(payload)
+                mail.attach(submsg)
+            else:
+                assert submsg.as_string()==plaintext, "plaintext was broken"
+                mail.attach(submsg)
+                submsg = Message()
+                submsg.add_header('Content-Type','application/pgp-signature; name="signature.asc"')
+                submsg.add_header('Content-Description', 'OpenPGP digital signature')
+                submsg.add_header('Content-Disposition','attachment; filename="signature.asc"')
+                submsg.set_payload(payload)
+                mail.attach(submsg)
+                if verify:
+                    vresult = self.verify_str(mail.get_payload(0).as_string(),payload)
+                    if not vresult.valid: return None, result
         return mail, result
 
 def find_gnupg_key(gpg,addr,secret=False,key_ids=False):
