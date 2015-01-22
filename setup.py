@@ -17,7 +17,7 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
-import setuptools
+import setuptools, sys
 from setuptools.command.test import test as TestCommand
 
 __author__ = "Thomas Tanner"
@@ -41,8 +41,10 @@ class PyTest(TestCommand):
         #import here, cause outside the eggs aren't loaded
         import pytest, sys
         args = [self.pytest_args] if self.pytest_args else []
-        errno = pytest.main(['tests']+args)
+        errno = pytest.main(['--cov-config','.coveragerc','--cov','kryptomime']+args)
         sys.exit(errno)
+
+subproc = ["subprocess32"] if sys.version_info[0] == 2 else []
 
 setuptools.setup(
     name = "kryptomime",
@@ -61,10 +63,10 @@ setuptools.setup(
     packages=['kryptomime'],
     package_data={'': ['README.rst', 'COPYING.txt', 'requirements.txt']},
 
-    tests_require=['pytest','pytest-pythonpath','coverage'],
+    tests_require=['pytest-cov','pytest-pythonpath'],
     cmdclass = {'test': PyTest},
 
-    install_requires=['gnupg>=1.3.2','six>=1.4.1'],
+    install_requires=['gnupg>=1.3.2','six>=1.8']+subproc,
     extras_require={'docs': ["Sphinx>=1.1", "repoze.sphinx"]},
 
     platforms="Linux, BSD, OSX, Windows",
@@ -77,8 +79,6 @@ setuptools.setup(
         "Programming Language :: Python :: 2",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 2.7",
-        "Programming Language :: Python :: 3.0",
-        "Programming Language :: Python :: 3.1",
         "Programming Language :: Python :: 3.2",
         "Programming Language :: Python :: 3.3",
         "Programming Language :: Python :: 3.4",
