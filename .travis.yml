@@ -7,13 +7,12 @@ python:
   - "2.7"
   - "3.4"
 install:
-  - pip install coveralls
   - pip install gnupg
   - pip install psutil
-  - pip install subprocess32
-  - pip install pytest
+  - test $TRAVIS_PYTHON_VERSION = 2.7 && pip install subprocess32
   - pip install pytest-pythonpath
   - pip install coverage
+  - pip install coveralls
   - python setup.py install
 script:
   - coverage run --source kryptomime -m py.test
