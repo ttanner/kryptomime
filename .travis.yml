@@ -9,7 +9,7 @@ python:
 install:
   - pip install gnupg
   - pip install psutil
-  - test $TRAVIS_PYTHON_VERSION = 2.7 && pip install subprocess32
+  - if test $TRAVIS_PYTHON_VERSION = 2.7; then pip install subprocess32; fi
   - pip install pytest-pythonpath
   - pip install coverage
   - pip install coveralls
