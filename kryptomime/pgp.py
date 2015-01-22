@@ -71,7 +71,7 @@ class PGPMIME(KryptoMIME):
         return text
 
     @staticmethod
-    def _plaintext(mail, inline = False, protect=False):
+    def _plaintext(mail, inline = False):
         # Extract / generate plaintext
         import copy
         multipart = mail.is_multipart()
@@ -312,13 +312,15 @@ class PGPMIME(KryptoMIME):
             results.append(result)
         return rawmail, {'signed':signed,'fingerprints':fingerprints,'key_ids':key_ids,'results':results}
 
-    def verify(self, mail, strict=False, **kwargs):
+    def verify(self, mail, strict=False, valid_keys=[], **kwargs):
         """Verifies the validity of the signature of an email.
 
         :type mail: string or Message object
         :param mail: A string or email
         :param strict: Whether verify the message as is. Otherwise try with different line separators.
         :type strict: bool
+        :param valid_keys: keyids accepted as valid signature. By default the sender email.
+        :type valid_keys list
         :returns: whether the input was signed by the sender and detailed results
              (whether it was 'encrypted',the 'decryption' results, whether it was 'signed',
              the verification 'results' and valid 'key_ids'/'fingerprints')
@@ -340,14 +342,25 @@ class PGPMIME(KryptoMIME):
         sender = mail.get('from', [])
         sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
         sender = self.find_key(sender)
+        if not valid_keys:
+            valid_keys = [sender]
+        else:
+            valid_keys = [self.find_key(keyid) for keyid in valid_keys]
         ciphertext, is_pgpmime = self._ciphertext(mail)
         if ciphertext: # Ciphertext present?
             results['encrypted'] = True
             if not 'default_key' in kwargs:
-                if not self.default_key: return False, results # key required
-                kwargs['default_key'] = sender
+                if not self.default_key: raise KeyMissingError("default")
+                tos = mail.get_all('to', []) + mail.get_all('cc', [])
+                receiver = None
+                for to in tos:
+                    receiver = self.find_key( email.utils.parseaddr(decode_header(to)[0][0])[1] )
+                    if receiver: break
+                if not receiver:
+                    raise KeyMissingError("receiver")
+                kwargs['default_key'] = receiver
             elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
-                return False, results # key required
+                raise KeyMissingError("default")
             ciphertext = self._fix_quoting(ciphertext)
             result = self.decrypt_str(ciphertext, **kwargs)
             results['decryption'] = result
@@ -359,7 +372,7 @@ class PGPMIME(KryptoMIME):
                 results['fingerprints'] = [result.fingerprint]
                 results['key_ids'] = [result.key_id]
                 results['results'] = [result]
-                if sender == result.fingerprint: return True, results
+                if result.fingerprint in valid_keys: return True, results
             plaintext = str(result)
             mail = self._decoded(mail,plaintext,is_pgpmime)
         payload, signatures, rawmail = self._signature(mail)
@@ -369,17 +382,20 @@ class PGPMIME(KryptoMIME):
         results['fingerprints'].extend(sresults['fingerprints'])
         results['key_ids'].extend(sresults['key_ids'])
         results['results'].extend(sresults['results'])
-        return results['signed'] and sender in results['fingerprints'], results
+        valid = results['signed'] and len(set(valid_keys).intersection(results['fingerprints']))
+        return valid, results
 
-    def decrypt(self, mail, strict=False, **kwargs):
+    def decrypt(self, mail, strict=False, valid_keys=[], **kwargs):
         """Decrypts and verifies an email.
 
         :param mail: A string or email
         :type mail: string or Message object
         :param strict: Whether verify the message as is. Otherwise try with different line separators.
         :type strict: bool
+        :param valid_keys: keyids accepted as valid signature. By default the sender email.
+        :type valid_keys list
         :returns: An email without signature (None if the decryption failed),
-             whether the input was signed by the sender and detailed results
+             whether the input was signed by at least one valid key and detailed results
              (whether it was 'encrypted',the 'decryption' results, whether it was 'signed',
              the decryption 'results' and valid 'key_ids'/'fingerprints')
         :rtype: (Message,bool,{encrypted:bool,signed:bool,key_ids:list,decryption:dict,results:list of dicts})
@@ -402,6 +418,10 @@ class PGPMIME(KryptoMIME):
         sender = mail.get('from', [])
         sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
         sender = self.find_key(sender)
+        if not valid_keys:
+            valid_keys = [sender]
+        else:
+            valid_keys = [self.find_key(keyid) for keyid in valid_keys]
         ciphertext, is_pgpmime = self._ciphertext(mail)
         if ciphertext: # Ciphertext present? Decode
             results['encrypted'] = True
@@ -431,7 +451,7 @@ class PGPMIME(KryptoMIME):
                 results['fingerprints'] = [result.fingerprint]
                 results['key_ids'] = [result.key_id]
                 results['results'] = [result]
-                if sender == result.fingerprint: return mail, True, results
+                if result.fingerprint in valid_keys: return mail, True, results
         payload, signatures, rawmail = self._signature(mail)
         if not payload: return rawmail, False, results # no plain msg
         rawmail, sresults = self._check_signatures(payload, signatures, rawmail, strict=strict)
@@ -439,10 +459,11 @@ class PGPMIME(KryptoMIME):
         results['fingerprints'].extend(sresults['fingerprints'])
         results['key_ids'].extend(sresults['key_ids'])
         results['results'].extend(sresults['results'])
-        return rawmail, results['signed'] and sender in results['fingerprints'], results
+        valid = results['signed'] and len(set(valid_keys).intersection(results['fingerprints']))
+        return rawmail, valid, results
 
     def sign(self, mail, inline=False, verify=False, **kwargs):
-        """Signs an email with the sender's (From) signature.
+        """Signs an email with the default_key if specified, otherwise the sender's (From) signature.
 
         :param mail: A string or email
         :type mail: string or Message object
@@ -513,8 +534,8 @@ class PGPMIME(KryptoMIME):
                 if not vresult.valid: return None, result
         return mail, result
 
-    def encrypt(self, mail, sign=True, inline=False, toself=True, verify=False, **kwargs):
-        """Encrypts an email for the recipients in To/CC.
+    def encrypt(self, mail, sign=True, inline=False, recipients=None, toself=True, verify=False, **kwargs):
+        """Encrypts an email for the recipients and optionally signs it.
 
         :param mail: A string or email
         :type mail: string or Message object
@@ -522,6 +543,8 @@ class PGPMIME(KryptoMIME):
         :type sign: bool
         :param inline: Whether to use the PGP inline format for messages with attachments, i.e. no multipart.
         :type inline: bool
+        :param recipients: List of keyids to encrypt for. By default the addresses in To/CC.
+        :type recipients: list or None
         :param toself: Whether to add sender to the recipients for self-decryption.
         :type toself: bool
         :param verify: Whether to verify the encrypted mail immediately (toself must be enabled or recipient key be known).
@@ -534,8 +557,11 @@ class PGPMIME(KryptoMIME):
         from email.message import Message
         from .mail import _mail_addreplace_header, protect_mail, as_protected
         mail = protect_mail(mail,linesep=None)
-        tos = mail.get_all('to', []) + mail.get_all('cc', [])
-        recipients = [self.find_key( email.utils.parseaddr(decode_header(to)[0][0])[1] ) for to in tos]
+        if not recipients:
+            tos = mail.get_all('to', []) + mail.get_all('cc', [])
+            recipients = [self.find_key( email.utils.parseaddr(decode_header(to)[0][0])[1] ) for to in tos]
+        else:
+            recipients = [self.find_key( keyid ) for keyid in recipients]
         if None in recipients:
             raise KeyMissingError("recipients")
         if toself or sign:
@@ -551,7 +577,7 @@ class PGPMIME(KryptoMIME):
                 kwargs['default_key'] = senderkey
             elif kwargs['default_key']==False or (kwargs['default_key']==True and not self.default_key):
                 raise KeyMissingError("default")
-        plaintext, submsg = self._plaintext(mail, inline, protect=False)
+        plaintext, submsg = self._plaintext(mail, inline)
         # Do encryption, report errors
         kwargs['sign'] = sign
         kwargs['armor'] = True

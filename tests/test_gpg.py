@@ -23,6 +23,7 @@ from pytest import fixture, mark, raises
 
 from kryptomime import create_mail, GPGMIME, protect_mail, KeyMissingError
 from kryptomime.pgp import find_gnupg_key
+from kryptomime.backends import tmpfname
 
 import gnupg, email.mime.text
 
@@ -40,13 +41,6 @@ msgrev = create_mail(receiver,sender,'subject','body\nmessage')
 msgself = create_mail(sender,sender,'subject','body\nmessage')
 prot = protect_mail(msg,linesep='\r\n')
 protatt = protect_mail(msgatt,linesep='\r\n')
-
-def mktmp():
-    import tempfile
-    tmp = tempfile.NamedTemporaryFile(delete=False)
-    name = tmp.name
-    tmp.close()
-    return name
 
 def compare_mail(a,b):
     if type(a)==str: return a==b
@@ -68,8 +62,8 @@ def keys(request):
     generate = request.config.getoption('generate')
     verbose = request.config.getoption('gpglog')
     if verbose: gnupg._logger.create_logger(10)
-    keyrings = [mktmp() for i in range(2)]
-    secrings = [mktmp() for i in range(2)]
+    keyrings = [tmpfname() for i in range(2)]
+    secrings = [tmpfname() for i in range(2)]
     home = os.path.dirname(os.path.abspath(__file__))
     fpubkey = [os.path.join(home,'pubkey%i.asc'%(i+1)) for i in range(2)]
     fseckey = [os.path.join(home,'seckey%i.asc'%(i+1)) for i in range(2)]
@@ -229,7 +223,7 @@ def test_unknown_encrypt(gpgsender):
 
 @fixture(scope='module')
 def unilateral(request,keys):
-    keyring = mktmp()
+    keyring = tmpfname()
     gpg = gnupg.GPG(keyring=keyring,secring=keys['secrings'][0],use_agent=False)
     gpg.import_keys(keys['pubkey1'])
     gpg.import_keys(keys['pubkey2']) # sender knows receiver pubkey
@@ -312,7 +306,7 @@ class TestUnilateral:
 
 @fixture(scope='module')
 def bilateral(request,keys):
-    keyrings = [mktmp() for i in range(2)]
+    keyrings = [tmpfname() for i in range(2)]
     gpg1 = gnupg.GPG(keyring=keyrings[0],secring=keys['secrings'][0],use_agent=False)
     gpg2 = gnupg.GPG(keyring=keyrings[1],secring=keys['secrings'][1],use_agent=False)
     gpg1.import_keys(keys['pubkey1'])
@@ -465,17 +459,17 @@ class TestBilateral:
         assert not result1['fingerprints'] and not result2['fingerprints']
 
     def test_bad_sign(self,bilateral,gpgreceiver):
-        self.bad_sign(bilateral,gpgreceiver,msg, False)
+        self.bad_sign(bilateral,gpgreceiver,msg,False)
 
     def test_bad_sign_encrypt(self,bilateral,gpgreceiver):
-        self.bad_sign(bilateral,gpgreceiver, msg, True)
+        self.bad_sign(bilateral,gpgreceiver,msg,True)
 
     def bad_encrypt(self,ids,receiver,sign):
         # id1 encrypts for id1, but id2 can't decrypt id1
         id1, id2 = ids['id1'], receiver
         enc,_ = id1.encrypt(msgself,sign=sign)
         assert enc and id2.analyze(enc) == (True,None)
-        verified2, result2 = id2.verify(enc)
+        with raises(KeyMissingError): id2.verify(enc)
         with raises(KeyMissingError): id2.decrypt(enc)
 
     def test_bad_encrypt(self,bilateral,gpgreceiver):

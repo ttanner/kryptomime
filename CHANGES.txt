@@ -1,9 +1,12 @@
-v0.5.0, xx.01.2015
+v0.5.0, 22.01.2015
 ------------------
-- create_mail has new BCC and charset parameters
 - full support for unicode and other charsets
+- create_mail has new BCC and charset parameters
+- valid key ids may be explicitly specified for verify and decrypt
+- recipient key ids may be explicitly specified for encrypt
 - backwards incompatible change: ending renamed to linesep in protect_mail
 - use policies for Python3 and improved Python3 support
+- initial experimental S/MIME support via OpenSSL
 - more coverage
 
 v0.4.1, 10.12.2014

@@ -1,8 +1,8 @@
 kryptomime
 ==========
 
-A package for encrypted MIME messages. It currently supports PGP/MIME
-via GPG. S/MIME support is planned for future releases.
+A package for signed and encrypted MIME messages.
+It currently supports PGP/MIME via GnuPG and S/MIME via OpenSSL.
 
 Disclaimer
 ~~~~~~~~~~

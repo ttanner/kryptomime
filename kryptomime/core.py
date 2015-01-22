@@ -18,6 +18,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
+def make_list(x):
+    from six import string_types
+    if isinstance(x, string_types): return [x]
+    return x
+
 class KryptoMIME(object):
     def __init__(self, default_key=None):
         self.default_key = default_key

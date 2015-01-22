@@ -39,3 +39,4 @@
 # And, this one is actually used in the gnupg module code:
 #
 gnupg>=1.3.2
+subprocess32
