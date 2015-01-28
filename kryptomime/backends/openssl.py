@@ -55,9 +55,9 @@ class OpenSSL(object):
         import re
         self.openssl = find_binary(executable, 'openssl')
         versionstr, error = runcmd([self.openssl,'version'])
-        version = re.match(r'^OpenSSL (\d).(\d+).(\d+)(\w+)',versionstr)
-        assert not version is None, 'invalid openssl version'
-        version = [int(version.group(i)) for i in range(1,4)]+[version.group(4)]
+        version = re.match(r'^OpenSSL (\d).(\d+).(\d+)',versionstr)
+        assert not version is None, 'invalid openssl version '+versionstr
+        version = [int(version.group(i)) for i in range(1,4)]
         no = version[0]*100+version[1]*10+version[2]
         assert no>=101, "obsolete openssl version "+versionstr
         self.version = version
