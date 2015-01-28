@@ -36,12 +36,14 @@ def runcmd(cmd, input=None, stringio=True, **kwargs):
     else:
         from subprocess import Popen, PIPE, TimeoutExpired
     timeout = kwargs.pop('timeout', None)
-    if input: kwargs['stdin'] = PIPE
+    if input:
+        if not stringio: input = bytes(input)
+        kwargs['stdin'] = PIPE
+    if not 'bufsize' in kwargs: kwargs['bufsize']= -1
     if isinstance(cmd, six.string_types):
         import shlex
         cmd = shlex.split(cmd)
-    process = Popen(cmd,bufsize=-1, universal_newlines=stringio,
-        stdout=PIPE,stderr=PIPE,**kwargs)
+    process = Popen(cmd,universal_newlines=stringio,stdout=PIPE,stderr=PIPE,**kwargs)
     try:
         output, error = process.communicate(input=input, timeout=timeout)
     except TimeoutExpired:

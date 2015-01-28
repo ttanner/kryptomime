@@ -1,13 +1,20 @@
-v0.5.0, 22.01.2015
+v0.5.0, x.01.2015
 ------------------
 - full support for unicode and other charsets
 - create_mail has new BCC and charset parameters
 - valid key ids may be explicitly specified for verify and decrypt
 - recipient key ids may be explicitly specified for encrypt
-- backwards incompatible change: ending renamed to linesep in protect_mail
-- use policies for Python3 and improved Python3 support
+- support for multiple passphrases in verify/decrypt
+- backwards incompatible change:
+
+    - ending renamed to linesep in protect_mail
+    - missing default_key no longer raises KeyMissingError
+    - sign=True always uses sender key
+
+- use email policies for Python3 and improved Python3 support
 - initial experimental S/MIME support via OpenSSL
 - more coverage
+- minor bugfixes
 
 v0.4.1, 10.12.2014
 ------------------
@@ -19,8 +26,9 @@ v0.4.0, 03.12.2014
 - pubkey_attachment returns default key if no key specified
 - key_ids option for find_gnupg_key
 - backwards incompatible changes:
-- * the default for 'strict' is now False
-- * find_gnupg_key returns fingerprints by default
+
+    - the default for 'strict' is now False
+    - find_gnupg_key returns fingerprints by default
 
 v0.3.1, 10.10.2014
 ------------------

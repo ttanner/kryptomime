@@ -412,17 +412,21 @@ class TestBilateral:
         # no receiver key, cannot decrypt
         enc = bilateral['id2'].encrypt(msgrev)[0]
         assert enc
-        with raises(KeyMissingError): id1.decrypt(enc)
+        mail, valid, result = id1.decrypt(enc)
+        assert mail is None and not valid and not result['signed']
 
     def test_no_defkey2(self,bilateral):
         # missing defkey, cannot sign
         id1 = GPGMIME(bilateral['gpg1'])
-        with raises(KeyMissingError): id1.sign(msg,default_key=False)
-        with raises(KeyMissingError): id1.encrypt(msg,sign=True,default_key=False)
+        mail, result = id1.sign(msg,passphrase='bad')
+        assert mail is None and not result
+        mail, result = id1.encrypt(msg,sign=True,passphrase='bad')
+        assert mail is None and not result
         # no receiver key, cannot decrypt
         enc = bilateral['id2'].encrypt(msgrev)[0]
         assert enc
-        with raises(KeyMissingError): id1.decrypt(enc,default_key=False)
+        mail, valid, result = id1.decrypt(enc,passphrase='bad')
+        assert mail is None and not valid and not result['signed']
 
     def test_bad_passphrase(self,bilateral):
         # bad sender passphrase, cannot sign
@@ -469,8 +473,10 @@ class TestBilateral:
         id1, id2 = ids['id1'], receiver
         enc,_ = id1.encrypt(msgself,sign=sign)
         assert enc and id2.analyze(enc) == (True,None)
-        with raises(KeyMissingError): id2.verify(enc)
-        with raises(KeyMissingError): id2.decrypt(enc)
+        valid, result = id2.verify(enc)
+        assert not valid and not result['signed'] and result['encrypted']
+        mail, valid, result = id2.decrypt(enc)
+        assert mail is None and not valid and not result['signed'] and result['encrypted']
 
     def test_bad_encrypt(self,bilateral,gpgreceiver):
         self.bad_encrypt(bilateral,gpgreceiver,False)
@@ -478,14 +484,36 @@ class TestBilateral:
     def test_bad_encrypt_sign(self,bilateral,gpgreceiver):
         self.bad_encrypt(bilateral,gpgreceiver,True)
 
-    def test_file(self,bilateral):
-        from io import BytesIO
+    def test_str(self,bilateral):
         id1, id2 = bilateral['id1'], bilateral['id2']
-        secret = 'some\nsecret'.encode('ascii')
-        sgn = id1.sign_file(BytesIO(secret))
+        secret = 'some\nsecret'
+        sgn = id1.sign_str(secret)
         assert sgn
-        assert id2.verify_file(BytesIO(str(sgn).encode('ascii')))
-        enc = id1.encrypt_file(BytesIO(secret),[receiver],sign=sender)
+        assert id2.verify_str(str(sgn))
+        enc = id1.encrypt_str(secret,[receiver],sign=sender)
         assert enc
-        result = id2.decrypt_file(BytesIO(str(enc).encode('ascii')))
-        assert str(result).encode('ascii') == secret
+        result = id2.decrypt_str(str(enc))
+        assert str(result) == secret
+
+    @mark.parametrize("binary", [False,True])
+    def test_file(self,bilateral,binary):
+        from six import BytesIO, StringIO, PY3
+        if PY3 and not binary: return # FIXME: known bug in python-gnupg 1.4.0
+        id1, id2 = bilateral['id1'], bilateral['id2']
+        stream = BytesIO if binary else StringIO
+        secret = 'some\nsecret'
+        if binary: secret = secret.encode('ascii')
+        sgn = id1.sign_file(stream(secret))
+        assert sgn
+        sgn = str(sgn)
+        if binary: sgn = sgn.encode('ascii')
+        assert id2.verify_file(stream(sgn))
+        enc = id1.encrypt_file(stream(secret),[receiver],sign=sender)
+        assert enc
+        enc = str(enc)
+        if binary: enc = enc.encode('ascii')
+        result = id2.decrypt_file(stream(enc))
+        assert result
+        dec = str(result)
+        if binary: dec = dec.encode('ascii')
+        assert dec == secret

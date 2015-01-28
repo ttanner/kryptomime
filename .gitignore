@@ -1,4 +1,5 @@
 *.py[cod]
+.cache
 
 # C extensions
 *.so
@@ -18,6 +19,7 @@ develop-eggs
 lib
 lib64
 setup.cfg
+docs/_build
 
 # Installer logs
 pip-log.txt
@@ -26,6 +28,7 @@ pip-log.txt
 .coverage
 .tox
 nosetests.xml
+coverage_html_report
 
 # Translations
 *.mo
@@ -68,4 +71,4 @@ MANIFEST
 
 # Ignore log files and directories from tests:
 test/*
-
+gnupg/*
