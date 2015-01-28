@@ -54,12 +54,12 @@ class OpenSSL(object):
         from . import find_binary
         import re
         self.openssl = find_binary(executable, 'openssl')
-        version, error = runcmd([self.openssl,'version'])
-        version = re.match(r'^OpenSSL (\d).(\d+).(\d+)(\w+)',version)
+        versionstr, error = runcmd([self.openssl,'version'])
+        version = re.match(r'^OpenSSL (\d).(\d+).(\d+)(\w+)',versionstr)
         assert not version is None, 'invalid openssl version'
         version = [int(version.group(i)) for i in range(1,4)]+[version.group(4)]
         no = version[0]*100+version[1]*10+version[2]
-        assert no>101 or no==101 and version[3]>='k', "obsolete openssl version"
+        assert no>=101, "obsolete openssl version "+versionstr
         self.version = version
 
     def config_req(self, **kwargs):
