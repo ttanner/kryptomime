@@ -1,6 +1,9 @@
-v0.5.0, x.01.2015
+v0.5.0, x.02.2015
 ------------------
-- full support for unicode and other charsets
+- full support for unicode and other charsets, and binary input
+- experimental S/MIME support via OpenSSL (API may change)
+- new create_mime function to create MIME attachments
+- new mail_binary and mail_payload functions for 8bit encodings
 - create_mail has new BCC and charset parameters
 - valid key ids may be explicitly specified for verify and decrypt
 - recipient key ids may be explicitly specified for encrypt
@@ -10,9 +13,9 @@ v0.5.0, x.01.2015
     - ending renamed to linesep in protect_mail
     - missing default_key no longer raises KeyMissingError
     - sign=True always uses sender key
+    - pgp and transport module are no longer imported by toplevel
 
 - use email policies for Python3 and improved Python3 support
-- initial experimental S/MIME support via OpenSSL
 - more coverage
 - minor bugfixes
 

@@ -18,7 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
-import os
+import os, six
 
 class SubProcessError(Exception):
     def __init__(self, returncode, cmd, output=None, error=None):
@@ -29,16 +29,18 @@ class SubProcessError(Exception):
     def __str__(self):
         return "Command '%s' returned non-zero exit status %d" % (self.cmd, self.returncode)
 
-def runcmd(cmd, input=None, stringio=True, **kwargs):
-    import six
+if six.PY2:
+    from subprocess32 import TimeoutExpired
+else:
+    from subprocess import TimeoutExpired
+
+def runcmd(cmd, input=None, stringio=False, **kwargs):
     if six.PY2:
-        from subprocess32 import Popen, PIPE, TimeoutExpired
+        from subprocess32 import Popen, PIPE
     else:
-        from subprocess import Popen, PIPE, TimeoutExpired
+        from subprocess import Popen, PIPE
     timeout = kwargs.pop('timeout', None)
-    if input:
-        if not stringio: input = bytes(input)
-        kwargs['stdin'] = PIPE
+    if input: kwargs['stdin'] = PIPE
     if not 'bufsize' in kwargs: kwargs['bufsize']= -1
     if isinstance(cmd, six.string_types):
         import shlex

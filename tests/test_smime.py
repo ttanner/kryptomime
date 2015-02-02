@@ -21,7 +21,8 @@
 
 from pytest import fixture, mark, raises
 
-from kryptomime import create_mail, protect_mail, KeyMissingError
+from kryptomime import KeyMissingError
+from kryptomime.mail import create_mail, protect_mail
 from kryptomime.smime import OpenSMIME, PublicKey, PrivateKey, X509MemoryKeyStore, OpenSSL, OpenSSL_CA
 
 import email.mime.text
@@ -108,16 +109,19 @@ def smimereceiver(keys):
 def test_sign(keys, attach, smimesender, smimereceiver):
     id1, cacert1 = smimesender
     id2, cacert2 = smimereceiver
-    mail = msgatt if attach else msg
+    mail = protatt if attach else prot
     sgn = id1.sign(mail)
     vfy, signer, valid = id2.verify(sgn,cacerts=cacert1)
     assert valid and keys[0].public == signer
     compare_mail(mail,vfy)
 
-def test_encrypt(keys, smimesender, smimereceiver):
+@mark.parametrize("sign", [False,True])
+def test_encrypt(keys, sign, smimesender, smimereceiver):
     id1, cacert1 = smimesender
     id2, cacert2 = smimereceiver
-    enc = id1.encrypt(msgatt,[keys[1]],sign=True)
-    dec, signer, valid = id2.decrypt(enc,verify=True,cacerts=[cacert1])
-    assert valid and keys[0].public == signer
-    compare_mail(msgatt,dec)
+    enc = id1.encrypt(protatt,[keys[1]],sign=sign, verify=True)
+    dec = id2.decrypt(enc,verify=sign,cacerts=[cacert1])
+    if sign:
+        dec, signer, valid = dec
+        assert valid and keys[0].public == signer
+    compare_mail(protatt,dec)

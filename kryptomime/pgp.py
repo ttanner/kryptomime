@@ -21,13 +21,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
-from .core import KryptoMIME
-
-class KeyMissingError(Exception):
-    def __init__(self, key):
-        self.key = key
-    def __str__(self):
-        return "key missing: "+self.key
+from .core import KryptoMIME, KeyMissingError
 
 class PGPMIME(KryptoMIME):
 
@@ -37,10 +31,10 @@ class PGPMIME(KryptoMIME):
         secret searches in the secrety keyring """
         raise NotImplementedError
 
-    def sign_file(self, file, **kwargs):
+    def sign_file(self, file, signers=None, **kwargs):
         raise NotImplementedError
 
-    def sign_str(self, data, **kwargs):
+    def sign_str(self, data, signers=None, **kwargs):
         raise NotImplementedError
 
     def verify_file(self, file, signature=None):
@@ -49,10 +43,10 @@ class PGPMIME(KryptoMIME):
     def verify_str(self, data, signature=None):
         raise NotImplementedError
 
-    def encrypt_file(self, file, *recipients, **kwargs):
+    def encrypt_file(self, file, recipients, sign=True, **kwargs):
         raise NotImplementedError
 
-    def encrypt_str(self, data, *recipients, **kwargs):
+    def encrypt_str(self, data, recipients, sign=True, **kwargs):
         raise NotImplementedError
 
     def decrypt_file(self, file, **kwargs):
@@ -137,15 +131,15 @@ class PGPMIME(KryptoMIME):
 
     @staticmethod
     def _signature(mail):
-        from .mail import as_protected, _mail_transfer_content, protect_mail
+        from .mail import _protected, _mail_transfer_content, protect_mail
         from sys import version_info as vs
         payload = ''
         signatures = []
         rawmail = mail
-        mail = as_protected(mail)
+        mail = _protected(mail)
         fix_nl = (vs[0]==2 and vs[1]*10+vs[2]<77) or (vs[0]==3 and vs[1]*10+vs[2]<35)
         if mail.is_multipart():
-            rawmail = as_protected(mail,headersonly=True)
+            rawmail = _protected(mail,headersonly=True)
             if fix_nl: rawmail.epilogue='' # ensure final newline, workaround for http://bugs.python.org/issue14983
             if mail.get_content_type()=='multipart/signed' and mail.get_param('protocol')=='application/pgp-signature':
                 # handle detached signatures, these look like:
@@ -445,9 +439,9 @@ class PGPMIME(KryptoMIME):
         import email.utils, six
         from email.header import decode_header
         from email.message import Message
-        from .mail import _mail_addreplace_header, protect_mail, as_protected
+        from .mail import _mail_addreplace_header, protect_mail, _protected
         def find_sender(mail):
-            sender = mail.get('from', [])
+            sender = mail.get('from','')
             sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
             sender = self.find_key(sender,secret=True)
             if not sender: raise KeyMissingError("sender")
@@ -527,7 +521,7 @@ class PGPMIME(KryptoMIME):
                 tmp.set_param('protocol','application/pgp-signature')
                 tmp.set_param('micalg','pgp-sha1;')
             mail.replace_header('Content-Type',tmp['Content-Type'])
-            if six.PY3: mail = as_protected(mail,headersonly=True)
+            if six.PY3: mail = _protected(mail,headersonly=True)
             mail.set_payload(None)
             if encrypt:
                 mail.preamble = 'This is an OpenPGP/MIME encrypted message (RFC 4880 and 3156)'

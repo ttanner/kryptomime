@@ -19,11 +19,14 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
-from pytest import raises
-from kryptomime.mail import (protect_mail, as_protected, create_mail, check_charset,
-     fix_lines, _mail_addreplace_header)
+from __future__ import print_function
 
-from conftest import sender, receiver
+from pytest import raises, fixture
+from kryptomime.mail import (protect_mail, _protected,
+    create_mail, create_mime, check_charset, mail_payload,
+    fix_lines, _mail_addreplace_header, mail_binary)
+import six
+from conftest import sender, receiver, compare_mail
 
 def test_fixlines():
     assert fix_lines('') == ''
@@ -75,18 +78,16 @@ line2
     assert fix_lines(msg.get_payload(),'\r\n') == prot.get_payload()
 
 def test_attach():
-    import email.mime.text
-    attachment = email.mime.text.MIMEText('some\nattachment')
+    attachment = create_mime('some\nattachment')
     msg = create_mail(sender,receiver,'subject','body\nmessage',attach=[attachment])
     # boundary is generated randomly by as_string - hardcode here
     msg.set_boundary('===============1808028167789866750==')
-    prot = as_protected(msg)
+    prot = _protected(msg)
     assert prot.as_string() == msg.as_string()
     prot = protect_mail(msg,linesep='\n',sevenbit=True)
     assert prot.as_string() == msg.as_string()
 
 def test_charset():
-    import six
     cascii, clatin, cutf = 'us-ascii', 'latin_1', 'UTF-8'
     s = 'uber'
     assert check_charset(s,use_locale=False) == (s,cascii)
@@ -110,15 +111,126 @@ def test_charset():
     assert check_charset(u,clatin) == (l,clatin)
     assert check_charset(u,cutf) == (s,cutf)
 
-def test_unicode():
-    from email.mime.text import MIMEText
-    from email.header import decode_header
+@fixture(scope='module')
+def attachments():
+    s = u'über\n1\n2'
+    a0 = create_mime('uber')
+    a1 = create_mime(s)
+    a2 = create_mime(s,encoding='base64')
+    a3 = create_mime(s,encoding='quoted-printable')
+    a4 = create_mime(s,encoding='8bit')
+    a5 = create_mime(s.encode('iso8859-1'),charset='iso8859-1')
+    a6 = create_mime(s.encode('iso8859-1'),charset='iso8859-1',encoding='base64')
+    a7 = create_mime(s.encode('iso8859-1'),charset='iso8859-1',encoding='quoted-printable')
+    a8 = create_mime(s.encode('iso8859-1'),charset='iso8859-1',encoding='8bit')
+    return [a0,a1,a2,a3,a4,a5,a6,a7,a8]
+
+def test_attach_encoding(attachments):
     import six
+    s = u'über\n1\n2'
+    a = attachments
+    cte = 'Content-Transfer-Encoding'
+    assert a[0][cte] == '7bit'
+    for i in (4,8): assert a[i][cte] == '8bit'
+    for i in (3,7): assert a[i][cte] == 'quoted-printable'
+    for i in (1,2,5,6): assert a[i][cte] == 'base64'
+    for msg in a[1:]: assert mail_payload(msg)==s
+
+def test_8bit(attachments):
+    expect=b'''Content-Type: multipart/mixed; boundary="===============6661726347990728450=="
+MIME-Version: 1.0
+From: Foo <foo@localhost>
+To: Bar <bar@localhost>
+Subject: subject
+Date: Mon, 02 Feb 2015 12:00:00 +0100
+
+--===============6661726347990728450==
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+w7xiZXIKMQoy
+--===============6661726347990728450==
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+
+uber
+--===============6661726347990728450==
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+w7xiZXIKMQoy
+--===============6661726347990728450==
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+w7xiZXIKMQoy
+--===============6661726347990728450==
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+=C3=BCber
+1
+2
+--===============6661726347990728450==
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+\xc3\xbcber
+1
+2
+--===============6661726347990728450==
+Content-Type: text/plain; charset="iso8859-1"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+
+/GJlcgoxCjI=
+--===============6661726347990728450==
+Content-Type: text/plain; charset="iso8859-1"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+
+/GJlcgoxCjI=
+--===============6661726347990728450==
+Content-Type: text/plain; charset="iso8859-1"
+MIME-Version: 1.0
+Content-Transfer-Encoding: quoted-printable
+
+=FCber
+1
+2
+--===============6661726347990728450==
+Content-Type: text/plain; charset="iso8859-1"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+
+\xfcber
+1
+2
+--===============6661726347990728450==--
+'''
+    s = u'über\n1\n2'
+    msg = create_mail(sender,receiver,'subject',s,attach=attachments,time='Mon, 02 Feb 2015 12:00:00 +0100')
+    msg.set_boundary('===============6661726347990728450==')
+    out = mail_binary(msg)
+    assert out==expect
+    prot = protect_mail(out,linesep='\n',sevenbit=False)
+    att = prot.get_payload()
+    out2 = mail_binary(prot)
+    assert out==out2
+    compare_mail(msg,prot)
+
+def test_unicode():
+    from email.header import decode_header
     def get_header(msg,key):
         v = msg[key]
-        if six.PY2:
-            v = decode_header(v)[0]
-            v = v[0].decode(v[1])
+        v = decode_header(v)[0]
+        v = v[0].decode(v[1])
         return v
     usender = sender.replace('Foo',u'Föo')
     ureceiver = receiver.replace('Bar',u'Bär')
@@ -144,8 +256,8 @@ def test_unicode():
 
     attachment = 'some\nattachment'
     uattachment = u'söme\nattachment'
-    attach=MIMEText(attachment)
-    uattach=MIMEText(uattachment,_charset='utf-8')
+    attach=create_mime(attachment)
+    uattach=create_mime(uattachment,charset='utf-8')
     for variant in range(1,4):
         unibody,uniatt  = variant&1,variant&2
         msg = create_mail(sender,receiver,'subject',ubody if unibody else body,

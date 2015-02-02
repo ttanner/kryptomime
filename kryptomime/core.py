@@ -23,6 +23,12 @@ def make_list(x):
     if isinstance(x, string_types): return [x]
     return x
 
+class KeyMissingError(Exception):
+    def __init__(self, key):
+        self.key = key
+    def __str__(self):
+        return "key missing: "+self.key
+
 class KryptoMIME(object):
     def __init__(self, default_key=None):
         self.default_key = default_key

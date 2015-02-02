@@ -18,12 +18,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # For more details see the file COPYING.
 
+from .core import KeyMissingError
 from .mail import create_mail, protect_mail
-from .pgp import GPGMIME, KeyMissingError
-from .transport import IMAP4_TLS, SMTP_TLS
 
 # semantic version:
-# major (backwards incompatible),
+# major (backwards incompatible if >1),
 # minor (backwards compatible, feature-level),
 # implementation (bugfixes)
 version = (0,5,0)

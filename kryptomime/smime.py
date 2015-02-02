@@ -127,23 +127,23 @@ def _remove_headers(mail, decode=False):
     # delete all headers except content
     inner = copy.copy(mail)
     for key in inner.keys():
-        if key=='Content-Type': continue
-        if not multipart and key=='Content-Transfer-Encoding': continue
+        lkey = key.lower()
+        if lkey=='content-type': continue
+        if not multipart and lkey=='content-transfer-encoding': continue
         del inner[key]
     if multipart: inner.preamble='This is a multi-part message in MIME format.'
     return inner.as_string(), mail
 
 def _restore_headers(mail, inner, decode=False):
-    from .mail import protect_mail, _mail_addreplace_header, as_protected
+    from .mail import protect_mail, _mail_addreplace_header, _protected
     import six
     inner = protect_mail(inner,linesep=None)
-    if six.PY3: mail = as_protected(mail,headersonly=True)
+    if six.PY3: mail = _protected(mail,headersonly=True)
     if decode:
         for k,v in inner.items():
             _mail_addreplace_header(mail,k,v)
     else:
         mail.replace_header('Content-Type',inner['Content-Type'])
-        del mail['Content-Transfer-Encoding']
     mail.preamble = inner.preamble
     if inner.is_multipart():
         mail.set_payload(None)
@@ -168,11 +168,14 @@ class OpenSMIME(SMIME):
             assert isinstance(default_key, PrivateKey), "invalid default key"
         super(OpenSMIME,self).__init__(default_key, key_store)
 
-    def sign(self, mail, verify=True, **kwargs):
+    def sign(self, mail, verify=False, **kwargs):
         key = self.default_key
         inner, mail = _remove_headers(mail)
-        inner = self.openssl.sign(inner,key.public,key.private,key.passphrase,**kwargs)
-        return _restore_headers(mail, inner)
+        signed = self.openssl.sign(inner,key.public,key.private,key.passphrase,**kwargs)
+        if verify:
+            vfy, signer, valid = self.openssl.verify(signed,cacerts=make_list(verify),**kwargs)
+            assert valid and inner==vfy
+        return _restore_headers(mail, signed)
 
     def verify(self, mail, cacerts=None, **kwargs):
         inner, mail = _remove_headers(mail, decode=True)
@@ -181,20 +184,35 @@ class OpenSMIME(SMIME):
         return mail, signer, valid
 
     def encrypt(self, mail, recipients=None, sign=True, verify=False, **kwargs):
-        if sign==True:
+        if sign==True or verify:
             key = self.default_key
-            kwargs.update(dict(sign=key.public,private=key.private,
+            kwargs.update(dict(private=key.private,
                 password=key.passphrase,certs=key.cacerts))
+            if sign==True: kwargs['sign'] = key.public
+        elif sign: kwargs['sign'] = sign
         recipients = [key.public for key in recipients]
-        inner, mail = _remove_headers(mail)
-        inner = self.openssl.encrypt(inner,recipients,**kwargs)
-        return _restore_headers(mail, inner)
+        if verify:
+            key = self.default_key.public
+            if not key in recipients: recipients.append(key)
+        inner, mail = _remove_headers(mail, False)
+        encrypted = self.openssl.encrypt(inner,recipients,**kwargs)
+        if verify:
+            key = self.default_key
+            if sign:
+                del kwargs['sign']
+                dec, signer, valid = self.openssl.decrypt(encrypted,key.public,
+                    verify=True,cacerts=[key.cacerts], **kwargs)
+                assert valid
+            else:
+                dec = self.openssl.decrypt(encrypted, key.public, verify=False, **kwargs)
+            assert inner==dec
+        return _restore_headers(mail, encrypted, False)
 
     def decrypt(self, mail, recipient=None, verify=True, cacerts=None, **kwargs):
         key = recipient if recipient else self.default_key
-        inner, mail = _remove_headers(mail, decode=True)
+        inner, mail = _remove_headers(mail, True)
         result = self.openssl.decrypt(inner,key.public,private=key.private,password=key.passphrase,
             verify=verify, cacerts=make_list(cacerts), **kwargs)
-        mail = _restore_headers(mail, result[0] if verify else result, decode=True)
+        mail = _restore_headers(mail, result[0] if verify else result, True)
         if verify: return mail,result[1],result[2]
         return mail

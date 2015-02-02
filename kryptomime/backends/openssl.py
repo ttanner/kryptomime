@@ -50,17 +50,22 @@ def generate_config(cfg,extra):
     return s
 
 class OpenSSL(object):
-    def __init__(self,executable=None):
+    def __init__(self,executable=None,timeout=None):
         from . import find_binary
         import re
         self.openssl = find_binary(executable, 'openssl')
-        versionstr, error = runcmd([self.openssl,'version'])
+        versionstr, error = runcmd([self.openssl,'version'],stringio=True)
         version = re.match(r'^OpenSSL (\d).(\d+).(\d+)',versionstr)
         assert not version is None, 'invalid openssl version '+versionstr
         version = [int(version.group(i)) for i in range(1,4)]
         no = version[0]*100+version[1]*10+version[2]
         assert no>=101, "obsolete openssl version "+versionstr
         self.version = version
+        self.timeout = timeout
+
+    def run(self, cmd, **kwargs):
+        if not 'timeout' in kwargs: kwargs['timeout'] = self.timeout
+        return runcmd([self.openssl]+cmd, **kwargs)
 
     def config_req(self, **kwargs):
         bits = kwargs.get('bits',2048)
@@ -114,11 +119,11 @@ class OpenSSL(object):
         cfg = config_section('req',reqcfg) + config_section('v3_email',v3_email)
         cfg+= "[req_distinguished_name]\n%s\n" % subj
         config = tmpfname(data=cfg)
-        cmd = [self.openssl,'req','-x509','-config',config,'-new','-keyout',seckey,'-days',days,'-batch']
+        cmd = ['req','-x509','-config',config,'-new','-keyout',seckey,'-days',days,'-batch']
         if not password: cmd.append('-nodes')
         cmd.extend(args)
         try:
-            pub, error = runcmd(cmd)
+            pub, error = self.run(cmd,stringio=True)
             sec = open(seckey,'rt').read()
         except SubProcessError as e:
             print ('error', e.error)
@@ -140,11 +145,11 @@ class OpenSSL(object):
         cfg = config_section('req',reqcfg)
         cfg+= "[req_distinguished_name]\n%s\n" % subj
         config = tmpfname(data=cfg)
-        cmd = [self.openssl,'req','-config',config,'-new','-keyout',seckey,'-batch']
+        cmd = ['req','-config',config,'-new','-keyout',seckey,'-batch']
         if not password: cmd.append('-nodes')
         cmd.extend(args)
         try:
-            csr, error = runcmd(cmd)
+            csr, error = self.run(cmd,stringio=True)
             sec = open(seckey,'rt').read()
         except SubProcessError as e:
             print ('error', e.error)
@@ -158,7 +163,7 @@ class OpenSSL(object):
 
     def convert_key(self,key,inform='pem',outform='pem',
         password=None,passout=None,cipher='des3',public=False,args=[]):
-        cmd = [self.openssl,'rsa','-inform',inform,'-outform',outform]
+        cmd = ['rsa','-inform',inform,'-outform',outform]
         stringio = inform=='pem' and outform=='pem'
         env = {}
         if password:
@@ -170,7 +175,7 @@ class OpenSSL(object):
         if public: cmd.append('-pubout')
         cmd.append('-'+cipher)
         cmd.extend(args)
-        try: out, err = runcmd(cmd,input=key,stringio=stringio,env=env)
+        try: out, err = self.run(input=key,stringio=stringio,env=env)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
@@ -179,22 +184,22 @@ class OpenSSL(object):
 
     def extract_pkcs12(self,pkcs12,password=None,passout=None,
         cacert=True,client=True,private=True,args=[]):
-        cmd = [self.openssl,'pkcs12']
+        cmd = ['pkcs12']
         if not cacert:
             cmd.append('-clcerts' if client else '-nocerts')
         elif not client:
             cmd.append('-cacerts')
+        env = {}
         if not private: cmd.append('-nokeys')
         elif passout:
             cmd +=['-passout','env:PASSOUT']
             env['PASSOUT'] = passout
         else: cmd.append('-nodes')
-        env = {}
         if password:
             cmd +=['-passin','env:PASSIN']
             env['PASSIN'] = password
         cmd.extend(args)
-        try: pem, err = runcmd(cmd,input=pkcs12,env=env)
+        try: pem, err = self.run(cmd,input=pkcs12,env=env)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
@@ -215,7 +220,7 @@ class OpenSSL(object):
         detach=False,compress=False,version=3,args=[]):
         from email.message import Message
         if isinstance(msg,Message): msg = msg.as_string()
-        cmd = [self.openssl,('smime' if version==2 else 'cms'),'-sign']
+        cmd = [('smime' if version==2 else 'cms'),'-sign']
         tmpdir = TmpDir()
         if isinstance(public,(tuple,list,set)) and len(public)>1:
             for i, key in enumerate(public):
@@ -234,12 +239,13 @@ class OpenSSL(object):
         if compress: cmd.append('-compress')
         if detach: cmd.append('-nodetach')
         cmd.extend(args)
-        try: out, err = runcmd(cmd,input=msg,env=env)
+        msg = msg.encode('ascii')
+        try: out, err = self.run(cmd,input=msg,env=env)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
         finally: tmpdir.destroy()
-        return out
+        return out.decode('ascii')
 
     def encrypt(self,msg,recipients,
         sign=None,private=None,password=None,certs=[],
@@ -250,17 +256,18 @@ class OpenSSL(object):
         if sign:
             msg = self.sign(msg,sign,private,password,certs,
                 compress=compress,version=version,args=args)
-        cmd = [self.openssl,('smime' if version==2 else 'cms'),'-encrypt']
+        cmd = [('smime' if version==2 else 'cms'),'-encrypt']
         if cipher: cmd.append('-'+cipher)
         tmpdir = TmpDir()
         cmd = self.write_keys(cmd,recipients,tmpdir)
         cmd.extend(args)
-        try: out, err = runcmd(cmd,input=msg)
+        msg = msg.encode('ascii')
+        try: out, err = self.run(cmd,input=msg)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
         finally: tmpdir.destroy()
-        return out
+        return out.decode('ascii')
 
     def verify(self,msg,cacerts=[],certs=[],detach=None,
         compress=False,version=3,args=[]):
@@ -269,7 +276,7 @@ class OpenSSL(object):
         from email.message import Message
         if isinstance(msg,Message): msg = msg.as_string()
         env = {}
-        cmd = [self.openssl,('smime' if version==2 else 'cms'),'-verify']
+        cmd = [('smime' if version==2 else 'cms'),'-verify']
         tmpdir = TmpDir()
         signer = tmpdir.generate()
         cmd += ['-signer',signer]
@@ -284,15 +291,16 @@ class OpenSSL(object):
             cmd += ['-CAfile',cacerts]
         if compress: cmd.append('-uncompress')
         cmd.extend(args)
+        msg = msg.encode('ascii')
         try:
-            out, err = runcmd(cmd,input=msg,env=env)
+            out, err = self.run(cmd,input=msg,env=env)
             pub = open(signer).read()
-            valid = err.startswith('Verification successful')
+            valid = err.decode('ascii').startswith('Verification successful')
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None, None, None
         finally: tmpdir.destroy()
-        return out, pub, valid
+        return out.decode('ascii'), pub, valid
 
     def decrypt(self,msg,recipient,private=None,password=None,
         verify=True,cacerts=[],certs=[],
@@ -301,7 +309,7 @@ class OpenSSL(object):
         from email.message import Message
         if isinstance(msg,Message): msg = msg.as_string()
         env = {}
-        cmd = [self.openssl,('smime' if version==2 else 'cms'),'-decrypt']
+        cmd = [('smime' if version==2 else 'cms'),'-decrypt']
         tmpdir = TmpDir()
         pubkey = tmpdir.generate(data=recipient)
         cmd += ['-recip',pubkey]
@@ -314,12 +322,14 @@ class OpenSSL(object):
             env['PASSIN'] = password
         if compress: cmd.append('-uncompress')
         cmd.extend(args)
-        try: out, err = runcmd(cmd,input=msg,env=env)
+        msg = msg.encode('ascii')
+        try: out, err = self.run(cmd,input=msg,env=env)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             if not verify: return None
             return None, None, None
         finally: tmpdir.destroy()
+        out = out.decode('ascii')
         if not verify: return out
         return self.verify(out,cacerts=cacerts,certs=certs,
             compress=compress,version=version,args=args)
@@ -335,7 +345,7 @@ class OpenSSL_CA(OpenSSL):
             self.cacert = open(fname,'rt').read()
 
     def generate_crl(self,days=None,args=[]):
-        cmd = [self.openssl,'ca','-config','openssl.cnf','-batch',
+        cmd = ['ca','-config','openssl.cnf','-batch',
             '-notext','-gencrl','-out','crls/crl.pem']
         if days: cmd += ['-crldays',str(days)]
         cmd.extend(args)
@@ -343,11 +353,11 @@ class OpenSSL_CA(OpenSSL):
         if self.password:
             cmd +=['-passin','env:PASSIN']
             env['PASSIN'] = self.password
-        cmd2 = [self.openssl,'crl','-inform','pem','-outform','der',
+        cmd2 = ['crl','-inform','pem','-outform','der',
             '-in','crls/crl.pem','-out','crls/crl.der']
         try:
-            out, err = runcmd(cmd,cwd=self.dir,env=env)
-            out, err = runcmd(cmd2,cwd=self.dir)
+            out, err = self.run(cmd,cwd=self.dir,env=env,stringio=True)
+            out, err = self.run(cmd2,cwd=self.dir,stringio=True)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
@@ -475,7 +485,7 @@ class OpenSSL_CA(OpenSSL):
         cfg+= "[req_distinguished_name]\n%s\n" % subj
         config = tmpfname(data=cfg)
         seckey = os.path.join(dir,'private','cakey.pem')
-        cmd = [self.openssl,'req','-config',config,'-batch','-x509','-new',
+        cmd = ['req','-config',config,'-batch','-x509','-new',
             '-keyout','private/cakey.pem','-out','cacert.pem','-days',str(days)]
         env = {}
         if self.password:
@@ -483,7 +493,7 @@ class OpenSSL_CA(OpenSSL):
             env['PASSOUT'] = self.password
         else: cmd.append('-nodes')
         cmd.extend(args)
-        try: out, error = runcmd(cmd,cwd=dir,env=env)
+        try: out, error = self.run(cmd,cwd=dir,env=env,stringio=True)
         except SubProcessError as e:
             print ('error', e.error)
             return None
@@ -494,14 +504,14 @@ class OpenSSL_CA(OpenSSL):
 
     def sign_key(self,csr,cacert=False,pubkey=None,days=365,policy=None,args=[]):
         req = tmpfname(data=csr)
-        cmd = [self.openssl,'ca','-config','openssl.cnf','-batch','-notext','-in',req,'-days',str(days)]
+        cmd = ['ca','-config','openssl.cnf','-batch','-notext','-in',req,'-days',str(days)]
         if policy: cmd += ['-policy',policy]
         env = {}
         if self.password:
             cmd +=['-passin','env:PASSIN']
             env['PASSIN'] = self.password
         cmd.extend(args)
-        try: crt, err = runcmd(cmd,cwd=self.dir,env=env)
+        try: crt, err = self.run(cmd,cwd=self.dir,env=env,stringio=True)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None

@@ -21,8 +21,9 @@
 
 from pytest import fixture, mark, raises
 
-from kryptomime import create_mail, GPGMIME, protect_mail, KeyMissingError
-from kryptomime.pgp import find_gnupg_key
+from kryptomime import KeyMissingError
+from kryptomime.mail import create_mail, create_mime, protect_mail
+from kryptomime.pgp import GPGMIME, find_gnupg_key
 from kryptomime.backends import tmpfname
 
 import gnupg, email.mime.text
@@ -30,7 +31,7 @@ import gnupg, email.mime.text
 """
 TODO: 'multipart/encrypted' but single-part, text/plain but encrypted, 'multipart/mixed' but signed
 """
-from conftest import sender, receiver
+from conftest import sender, receiver, compare_mail
 
 passphrase='mysecret'
 attachment = email.mime.text.MIMEText('some\nattachment')
@@ -41,20 +42,6 @@ msgrev = create_mail(receiver,sender,'subject','body\nmessage')
 msgself = create_mail(sender,sender,'subject','body\nmessage')
 prot = protect_mail(msg,linesep='\r\n')
 protatt = protect_mail(msgatt,linesep='\r\n')
-
-def compare_mail(a,b):
-    if type(a)==str: return a==b
-    assert a.is_multipart() == b.is_multipart()
-    #from kryptomime.mail import ProtectedMessage
-    #assert isinstance(a,ProtectedMessage)==isinstance(b,ProtectedMessage)
-    # todo headers
-    if a.is_multipart():
-        for i in range(len(a.get_payload())):
-            ap = a.get_payload(i)
-            bp = b.get_payload(i)
-            assert ap.as_string() == bp.as_string()
-    else:
-        assert a.get_payload() == b.get_payload()
 
 @fixture(scope='module')
 def keys(request):
@@ -367,7 +354,7 @@ class TestBilateral:
     def test_uni_sign_attach(self,bilateral):
         usender = sender.replace('Foo','Föo')
         ureceiver = receiver.replace('Bar','Bär')
-        attachment = email.mime.text.MIMEText(u'söme\nattachment',_charset='utf-8')
+        attachment = create_mime(u'söme\nattachment',charset='utf-8')
         msgatt = create_mail(usender,ureceiver,u'sübject',u'bödy\nmessage',
             attach=[attachment],charset='utf-8')
         self.sign(bilateral, msgatt, inline=False)
