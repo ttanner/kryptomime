@@ -23,7 +23,7 @@ from pytest import fixture, mark, raises
 
 from kryptomime import KeyMissingError
 from kryptomime.mail import create_mail, protect_mail
-from kryptomime.smime import OpenSMIME, PublicKey, PrivateKey, X509MemoryKeyStore, OpenSSL, OpenSSL_CA
+from kryptomime.smime import OpenSMIME, Certificate, PrivateKey, MemoryKeyStore, OpenSSL, OpenSSL_CA
 
 import email.mime.text
 
@@ -78,23 +78,23 @@ def keys(request):
         ca2 = OpenSSL_CA(directory=ca2dir)
         cacert1 = ca1.generate_ca('CN=ca1')
         cacert2 = ca2.generate_ca('CN=ca2')
-        csr1, seckey1 = ca1.generate_key(sender,password=passphrase)
+        csr1, seckey1 = ca1.generate_key(sender,passphrase=passphrase)
         pubkey1 = ca1.sign_key(csr1,cacert=False,policy='policy_anything',days=3600)
         csr2, seckey2 = ca2.generate_key(receiver)
         pubkey2 = ca2.sign_key(csr2,cacert=False,policy='policy_anything',days=3600)
         assert pubkey1 and pubkey2
-        key1 = PrivateKey(pubkey1,private=seckey1,passphrase=passphrase,cacerts=cacert1)
+        key1 = PrivateKey(pubkey1,private=seckey1,passphrase=passphrase,cacerts=[cacert1])
         key1.save(fpubkey[0],fseckey[0],fcacert[0])
-        key2 = PrivateKey(pubkey2,private=seckey2,cacerts=cacert2)
+        key2 = PrivateKey(pubkey2,private=seckey2,cacerts=[cacert2])
         key2.save(fpubkey[1],fseckey[1],fcacert[1])
         from shutil import rmtree
         rmtree(ca1dir)
         rmtree(ca2dir)
     else:
         key1 = PrivateKey(passphrase=passphrase)
-        key1.load(fpubkey[0],fseckey[0],fcacert[0])
+        key1.load(fpubkey[0],fseckey[0],[fcacert[0]])
         key2 = PrivateKey()
-        key2.load(fpubkey[1],fseckey[1],fcacert[1])
+        key2.load(fpubkey[1],fseckey[1],[fcacert[1]])
     return (key1, key2)
 
 @fixture(scope='module')
@@ -112,7 +112,7 @@ def test_sign(keys, attach, smimesender, smimereceiver):
     mail = protatt if attach else prot
     sgn = id1.sign(mail)
     vfy, signer, valid = id2.verify(sgn,cacerts=cacert1)
-    assert valid and keys[0].public == signer
+    assert valid and keys[0].cert == signer
     compare_mail(mail,vfy)
 
 @mark.parametrize("sign", [False,True])
@@ -120,8 +120,8 @@ def test_encrypt(keys, sign, smimesender, smimereceiver):
     id1, cacert1 = smimesender
     id2, cacert2 = smimereceiver
     enc = id1.encrypt(protatt,[keys[1]],sign=sign, verify=True)
-    dec = id2.decrypt(enc,verify=sign,cacerts=[cacert1])
+    dec = id2.decrypt(enc,verify=sign,cacerts=cacert1)
     if sign:
         dec, signer, valid = dec
-        assert valid and keys[0].public == signer
+        assert valid and keys[0].cert == signer
     compare_mail(protatt,dec)

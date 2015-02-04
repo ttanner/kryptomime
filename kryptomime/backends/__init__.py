@@ -20,6 +20,63 @@
 
 import os, six
 
+ASN_abbrevations = dict( # abbrevations
+        CN='commonName',
+        C='countryName',
+        L='localityName',
+        ST='stateOrProvinceName',
+        O='organizationName',
+        OU='organizationalUnitName',
+        GN='givenName',
+        SN='surname',
+)
+
+def create_DN(dname,separator='\n',expand=False):
+    from six import iteritems
+    if isinstance(dname,dict):
+        if expand:
+            dname = (ASN_abbrevations.get(k,k)+'='+v for k,v in iteritems(dname))
+        else: dname = (k+'='+v for k,v in iteritems(dname))
+        return separator.join(dname)
+    return dname
+
+def parse_DN(dname,separator='/'):
+    res = {}
+    for rdn in dname.split(separator):
+        if not rdn: continue
+        i = rdn.index('=')
+        key,value = rdn[:i].strip(),rdn[i+1:].strip()
+        res[ASN_abbrevations.get(key,key)] = value
+    return res
+
+def split_pem(pem,strip=False):
+    from collections import OrderedDict
+    parts = OrderedDict()
+    block, within = '',''
+    begin, end = '-----BEGIN', '-----END'
+    for line in pem.splitlines(True):
+        if within:
+            final = line.startswith(end)
+            if final:
+                i = len(end)+1
+                j = line.index('-----',i)
+                assert within == line[i:j]
+                if not strip: block += line
+                if within in parts:
+                    parts[within].append(block)
+                else:
+                    parts[within] = [block]
+                block, within = '', False
+            else: block += line
+        else:
+            within = line.startswith(begin)
+            if within:
+                i = len(begin)+1
+                j = line.index('-----',i)
+                within = line[i:j]
+                if not strip: block += line
+    return parts
+
 class SubProcessError(Exception):
     def __init__(self, returncode, cmd, output=None, error=None):
         self.returncode = returncode
@@ -45,6 +102,9 @@ def runcmd(cmd, input=None, stringio=False, **kwargs):
     if isinstance(cmd, six.string_types):
         import shlex
         cmd = shlex.split(cmd)
+    elif kwargs.get('shell'):
+        from six.moves import shlex_quote
+        cmd = [shlex_quote(arg) for arg in cmd]
     process = Popen(cmd,universal_newlines=stringio,stdout=PIPE,stderr=PIPE,**kwargs)
     try:
         output, error = process.communicate(input=input, timeout=timeout)

@@ -293,7 +293,7 @@ def _set_header(msg,key,value,charset=None):
     value, charset = check_charset(value, charset)
     if charset!='us-ascii': value = Header(value, charset).encode()
     if key.lower()=='content-type':
-        msg.set_type(v)
+        msg.set_type(value)
     elif key in msg:
         msg.replace_header(key,value)
     else:
@@ -347,7 +347,7 @@ def create_mime(data,maintype='text',subtype='plain',charset=None,
     return msg
 
 def create_mail(sender,to,subject,body,cc=None,bcc=None,
-    attach=None,time=None,headers={},charset=None,encoding=None):
+    attach=None,time=None,subtype='plain',headers={},charset=None,encoding=None):
     """create an email with sender 'sender', receivers 'to', subject and body,
      optional CC, BCC, attachments, extra headers and time"""
     import email.mime.text, email.mime.multipart, email.utils
@@ -355,18 +355,18 @@ def create_mail(sender,to,subject,body,cc=None,bcc=None,
     import six
 
     body = fix_lines(body,replace=False)
-    msg = create_mime(body,charset=charset,encoding=encoding)
+    msg = create_mime(body,subtype=subtype,charset=charset,encoding=encoding)
     if not attach is None:
         mmsg = email.mime.multipart.MIMEMultipart()
         mmsg.attach(msg)
         for msg in attach: mmsg.attach(msg)
         msg = mmsg
     msg.set_unixfrom(email.utils.parseaddr(sender)[1])
-    _set_header(msg,'From',sender,charset)
-    _set_header(msg,'To',to,charset)
-    if cc: _set_header(msg,'CC',cc,charset)
-    if bcc: _set_header(msg,'BCC',bcc,charset)
-    _set_header(msg,'Subject',subject,charset)
+    _set_header(msg,'From',sender)
+    _set_header(msg,'To',to)
+    if cc: _set_header(msg,'CC',cc)
+    if bcc: _set_header(msg,'BCC',bcc)
+    _set_header(msg,'Subject',subject)
     if not time: time = time_mod.time()
     if not isinstance(time,six.string_types):
         time = email.utils.formatdate(time,localtime=True)

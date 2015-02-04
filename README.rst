@@ -11,6 +11,10 @@ Proper kryptography requires security audits of the complete system.
 Even though the author is not aware of any bugs in this software, it
 comes with ABSOLUTELY NO WARRANTY. USE THIS SOFTWARE AT YOUR OWN RISK.
 
+.. image:: https://pypip.in/version/kryptomime/badge.svg
+    :target: https://pypi.python.org/pypi/kryptomime/
+    :alt: Latest Version
+
 .. image:: https://travis-ci.org/ttanner/kryptomime.png?branch=master 
     :target: https://travis-ci.org/ttanner/kryptomime
     :alt: Build status

@@ -13,6 +13,7 @@ v0.5.0, x.02.2015
     - ending renamed to linesep in protect_mail
     - missing default_key no longer raises KeyMissingError
     - sign=True always uses sender key
+    - decrypt no longer accepts default_key parameter
     - pgp and transport module are no longer imported by toplevel
 
 - use email policies for Python3 and improved Python3 support
