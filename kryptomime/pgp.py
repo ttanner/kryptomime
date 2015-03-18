@@ -458,7 +458,7 @@ class PGPMIME(KryptoMIME):
                 recipients = [parseaddr(decode_header(to)[0][0])[1] for to in tos]
             elif isinstance(recipients, six.string_types):
                 recipients = [recipients]
-            recipients = self.find_key(recipients).values()
+            recipients = list(self.find_key(recipients).values())
             if None in recipients:
                 raise KeyMissingError("public keys for recipients")
             if sign==True or toself: sender = find_sender(mail) # use default_key?

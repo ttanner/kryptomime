@@ -117,7 +117,7 @@ if six.PY2:
 else:
     from subprocess import TimeoutExpired
 
-def runcmd(cmd, input=None, stringio=False, **kwargs):
+def runcmd(cmd, input=None, stringio=True, **kwargs):
     if six.PY2:
         from subprocess32 import Popen, PIPE
     else:
@@ -168,7 +168,7 @@ class TmpDir(object):
         from shutil import rmtree
         rmtree(self.dir)
 
-def tmpfname(data=None,mode='w+b',dir=None):
+def tmpfname(data=None,mode='wt',dir=None):
     from tempfile import NamedTemporaryFile
     tmp = NamedTemporaryFile(delete=False,mode=mode,dir=dir)
     name = tmp.name

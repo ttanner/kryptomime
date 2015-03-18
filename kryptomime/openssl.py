@@ -190,7 +190,7 @@ class OpenSSL(object):
         if not passphrase: cmd.append('-nodes')
         cmd.extend(args)
         try:
-            csr, error = self.run(cmd,input=req,stringio=True)
+            csr, error = self.run(cmd,input=req)
             sec = open(seckey,'rt').read()
         except SubProcessError as e:
             print ('error', e.error)
@@ -211,7 +211,7 @@ class OpenSSL(object):
             env['PASSIN'] = passphrase
         cmd.extend(args)
         try:
-            csr, error = self.run(cmd,input=req,stringio=True,env=env)
+            csr, error = self.run(cmd,input=req,env=env)
         except SubProcessError as e:
             print ('error', e.error)
             return None, None
@@ -232,7 +232,7 @@ class OpenSSL(object):
         cmd.extend(args)
         cmd.append(str(bits))
         try:
-            out, error = self.run(cmd,stringio=True)
+            out, error = self.run(cmd)
             sec = open(seckey,'rt').read()
         except SubProcessError as e:
             print ('error', e.error)
@@ -269,21 +269,23 @@ class OpenSSL(object):
             assert not pkcs8, 'pubkey not supported for pkcs8 conversion'
             cmd.append('-pubin')
         cmd.extend(args)
-        try: out, err = self.run(cmd, input=key,env=env)
+        stringio = inform=='pem' and outform=='pem'
+        try: out, err = self.run(cmd, input=key,env=env,stringio=stringio)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
-        if outform=='pem': return out.decode('ascii')
+        if not stringio and outform=='pem': return out.decode('ascii')
         return out
 
     def convert_x509(self,cert,inform='pem',outform='pem',args=[]):
         cmd = ['x509','-inform',inform,'-outform',outform]
         cmd.extend(args)
-        try: out, err = self.run(input=cert)
+        stringio = inform=='pem' and outform=='pem'
+        try: out, err = self.run(input=cert,stringio=stringio)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
-        if outform=='pem': return out.decode('ascii')
+        if not stringio and outform=='pem': return out.decode('ascii')
         return out
 
     def _trust_x509(self,cert,use=None,reject=False,clear=False,alias=None,
@@ -297,11 +299,12 @@ class OpenSSL(object):
             if use: cmd += ['-addtrust',use]
         if alias: cmd += ['-setalias',alias]
         cmd.extend(args)
-        try: out, err = self.run(input=cert)
+        stringio = inform=='pem' and outform=='pem'
+        try: out, err = self.run(input=cert,stringio=stringio)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
-        if outform=='pem': return out.decode('ascii')
+        if not stringio and outform=='pem': return out.decode('ascii')
         return out
 
     def trust_x509(self,cert,use=None,clear=False,alias=None,
@@ -319,7 +322,8 @@ class OpenSSL(object):
                 '-subject_hash','-email']
         cmd+= ['-certopt', 'no_issuer,no_subject,no_serial,no_validity,no_signame,no_sigdump,no_pubkey,ext_error']
         cmd.extend(args)
-        try: out, err = self.run(cmd,input=x509)
+        if inform=='pem': x509 = x509.encode('ascii')
+        try: out, err = self.run(cmd,input=x509,stringio=False)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
@@ -355,7 +359,8 @@ class OpenSSL(object):
         cmd = ['req','-batch','-noout','-nameopt','oneline','-inform',inform,'-text','-subject']
         cmd+= ['-reqopt', 'no_issuer,no_subject,no_serial,no_validity,no_signame,no_sigdump,no_pubkey']
         cmd.extend(args)
-        try: out, err = self.run(cmd,input=req)
+        if inform=='pem': req = req.encode('ascii')
+        try: out, err = self.run(cmd,input=req,stringio=False)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
@@ -380,7 +385,7 @@ class OpenSSL(object):
                 certs = tmpdir.generate(data=''.join(certs))
             cmd += ['-untrusted',certs]
         cmd.extend(args)
-        try: out, err = self.run(cmd,input=x509,stringio=True)
+        try: out, err = self.run(cmd,input=x509)
         except SubProcessError as e:
             return False, e.error
         finally: tmpdir.destroy()
@@ -404,7 +409,7 @@ class OpenSSL(object):
             cmd +=['-passin','env:PASSIN']
             env['PASSIN'] = passphrase
         cmd.extend(args)
-        try: out, err = self.run(cmd,input=pkcs12,env=env)
+        try: out, err = self.run(cmd,input=pkcs12,env=env,stringio=False)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
@@ -441,7 +446,7 @@ class OpenSSL(object):
             env['PASSIN'] = passin
         if fname: cmd += ['-out',fname]
         cmd.extend(args)
-        try: out, err = self.run(cmd,input=public,env=env)
+        try: out, err = self.run(cmd,input=public.encode('ascii'),env=env,stringio=False)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
@@ -484,7 +489,7 @@ class OpenSSL(object):
         if detach: cmd.append('-nodetach')
         cmd.extend(args)
         msg = msg.encode('ascii')
-        try: out, err = self.run(cmd,input=msg,env=env)
+        try: out, err = self.run(cmd,input=msg,env=env,stringio=False)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
@@ -506,7 +511,7 @@ class OpenSSL(object):
         cmd = self.write_keys(cmd,recipients,tmpdir)
         cmd.extend(args)
         msg = msg.encode('ascii')
-        try: out, err = self.run(cmd,input=msg)
+        try: out, err = self.run(cmd,input=msg,stringio=False)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
@@ -537,7 +542,7 @@ class OpenSSL(object):
         cmd.extend(args)
         msg = msg.encode('ascii')
         try:
-            out, err = self.run(cmd,input=msg,env=env)
+            out, err = self.run(cmd,input=msg,env=env,stringio=False)
             pub = open(signer).read()
             valid = err.decode('ascii').startswith('Verification successful')
         except SubProcessError as e:
@@ -567,7 +572,7 @@ class OpenSSL(object):
         if compress: cmd.append('-uncompress')
         cmd.extend(args)
         msg = msg.encode('ascii')
-        try: out, err = self.run(cmd,input=msg,env=env)
+        try: out, err = self.run(cmd,input=msg,env=env,stringio=False)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             if not verify: return None
@@ -621,7 +626,7 @@ class OpenSSL(object):
         if not passphrase: cmd.append('-nodes')
         cmd.extend(args)
         try:
-            pub, error = self.run(cmd,stringio=True)
+            pub, error = self.run(cmd)
             sec = open(seckey,'rt').read()
         except SubProcessError as e:
             print ('error', e.error)
@@ -657,8 +662,8 @@ class OpenSSL_CA(OpenSSL):
         cmd2 = ['crl','-inform','pem','-outform','der',
             '-in','crls/crl.pem','-out','crls/crl.der']
         try:
-            out, err = self.run(cmd,cwd=self.dir,env=env,stringio=True)
-            out, err = self.run(cmd2,cwd=self.dir,stringio=True)
+            out, err = self.run(cmd,cwd=self.dir,env=env)
+            out, err = self.run(cmd2,cwd=self.dir)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
@@ -829,7 +834,7 @@ class OpenSSL_CA(OpenSSL):
                 env['PASSOUT'] = self.passphrase
             else: cmd.append('-nodes')
         cmd.extend(args)
-        try: out, error = self.run(cmd,input=req,cwd=dir,env=env,stringio=True)
+        try: out, error = self.run(cmd,input=req,cwd=dir,env=env)
         except SubProcessError as e:
             print ('error', e.error)
             return None
@@ -882,7 +887,7 @@ class OpenSSL_CA(OpenSSL):
             env['PASSIN'] = self.passphrase
         cmd.extend(args)
         cmd += ['-in',req]
-        try: crt, err = self.run(cmd,cwd=self.dir,env=env,stringio=True)
+        try: crt, err = self.run(cmd,cwd=self.dir,env=env)
         except SubProcessError as e:
             print ('error',e.error, e.output)
             return None
