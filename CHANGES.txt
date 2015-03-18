@@ -1,7 +1,8 @@
-v0.5.0, x.02.2015
+v0.5.0, x.03.2015
 ------------------
 - full support for unicode and other charsets, and binary input
 - experimental S/MIME support via OpenSSL (API may change)
+- change to LGPL license
 - new create_mime function to create MIME attachments
 - new mail_binary and mail_payload functions for 8bit encodings
 - create_mail has new BCC and charset parameters
