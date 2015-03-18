@@ -20,6 +20,7 @@
 # For more details see the file COPYING.
 
 from pytest import fixture, mark, raises
+from itertools import product
 
 from kryptomime import KeyMissingError
 from kryptomime.mail import create_mail, create_mime, protect_mail
@@ -42,6 +43,7 @@ msgrev = create_mail(receiver,sender,'subject','body\nmessage')
 msgself = create_mail(sender,sender,'subject','body\nmessage')
 prot = protect_mail(msg,linesep='\r\n')
 protatt = protect_mail(msgatt,linesep='\r\n')
+bools = [False,True]
 
 @fixture(scope='module')
 def keys(request):
@@ -118,14 +120,12 @@ def print_mail(m):
     else:
         print (repr(m.get_payload()))
 
-@mark.parametrize("variant", range(16))
-def test_sign(gpgsender,variant):
+@mark.parametrize("inline,attach,asstr,protect", product(bools,bools,bools,bools))
+def test_sign(gpgsender,inline,attach,asstr,protect):
     # protect = use protected CRLF message
     import copy
-    inline,attach,asstr,protect=variant&8,variant&4,variant&2,variant&1
     if inline and attach: return
 
-    global prot, protatt
     if attach: # with attachment
         nmsg, pmsg = protect_mail(msgatt,linesep='\n'), protatt
         inmsg = protatt if protect else nmsg
@@ -179,10 +179,9 @@ def test_sign(gpgsender,variant):
     else:
         compare_mail(pmsg,msg2)
 
-@mark.parametrize("variant", range(4))
-def test_encrypt(gpgsender,variant):
+@mark.parametrize("asstr,protect", product(bools,bools))
+def test_encrypt(gpgsender, asstr, protect):
     import copy
-    asstr,protect=variant&2,variant&1
     inmsg = protect_mail(msgrev,linesep='\r\n') if protect else msgrev
     if asstr: inmsg = inmsg.as_string()
     omsg = copy.deepcopy(inmsg)

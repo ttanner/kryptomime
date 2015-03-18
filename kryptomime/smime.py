@@ -50,9 +50,10 @@ class SMIME(KryptoMIME):
 class Certificate(object):
     "always pem"
 
-    def __init__(self, cert=None, cacerts=None):
+    def __init__(self, cert=None, cacerts=None, trusted=False):
         self.cert = cert
         self.cacerts = cacerts
+        self.trusted = trusted
 
     def load(self,fname,cafile=None):
         self.cert = open(fname,'rt').read()
@@ -74,8 +75,8 @@ class Certificate(object):
 
 class PrivateKey(Certificate):
 
-    def __init__(self, cert=None, private=None, passphrase=None, cacerts=None):
-        super(PrivateKey,self).__init__(cert,cacerts)
+    def __init__(self, cert=None, private=None, passphrase=None, cacerts=None, trusted=True):
+        super(PrivateKey,self).__init__(cert,cacerts,trusted)
         self.private = private
         self.passphrase = passphrase
 
@@ -111,9 +112,6 @@ class X509KeyStore(object):
     def export_key(self,keyid):
         raise NotImplementedError
 
-def hashable_dict(d):
-    return frozenset(sorted(d.items()))
-
 class OpenSSLKeyStore(X509KeyStore):
 
     def __init__(self, openssl=None, digest=None):
@@ -129,58 +127,54 @@ class OpenSSLKeyStore(X509KeyStore):
         self.digest = digest or 'sha256'
 
     def load_certfile(self,fname,cafile=[],format='pem'):
-        mode = 'rt' if format=='pem' else 'rb'
-        with open(fname,mode) as f: cert = f.read()
-        cacerts = []
-        for fname in make_list(cafile):
-            with open(fname,mode) as f:
-                cacerts.append(f.read())
-        return self.load_cert(cert,cacerts,format)
+        return self._load_file(False,fname,None,None,cafile,format)
+
+    def load_privatefile(self,fname,private=None,passphrase=None,cafile=[],format='pem'):
+        return self._load_file(True,fname,private,passphrase,cafile,format)
 
     def load_cert(self,cert,cacerts=[],format='pem'):
-        from six import iteritems
-        if format!='pem':
-            cert = self.openssl.convert_x509(cert,inform=format,outform='pem')
-            cacerts = [self.openssl.convert_x509(cacert,inform=format,outform='pem')
-                         for cacert in cacerts]
-        elif not cacerts:
-            cacerts = split_pem(cert)['CERTIFICATE']
-            cert = cacerts.pop(0) # assume cert comes first
-        info = self.openssl.decode_x509(cert)
-        cert = Certificate(cert,cacerts)
-        for k,v in iteritems(cert): setattr(cert,k,v)
-        if not 'email' in cert: setattr(cert,'email',None)
-        return cert
+        return _load_key(False,cert,None,None,cacerts,format)
 
-    def load_privatefile(self,fname,private=None,passphrase=None,cafile=[],passout=None,format='pem'):
+    def load_private(self,cert,private=None,passphrase=None,cacerts=[],format='pem'):
+        "der: cert+private, pem: cert only or both"
+        return _load_key(True,cert,private,passphrase,cacerts,format)
+
+    def _load_file(self,priv,fname,private,passphrase,cafile,format):
         mode = 'rt' if format=='pem' else 'rb'
         with open(fname,mode) as f: cert = f.read()
-        if private:
+        if priv and private:
             with open(private,mode) as f: private = f.read()
         cacerts = []
         for fname in make_list(cafile):
             with open(fname,mode) as f:
                 cacerts.append(f.read())
-        return self.load_private(cert,private,passphrase,cacerts,passout,format)
+        return self._load_key(priv,cert,private,passphrase,cacerts,format)
 
-    def load_private(self,cert,private=None,passphrase=None,cacerts=[],passout=None,format='pem'):
-        "der: cert+private, pem: cert only or both"
+    def _load_key(self,priv,cert,private,passphrase,cacerts,format):
         from six import iteritems
         if format!='pem':
             cert = self.openssl.convert_x509(cert,inform=format,outform='pem')
-            assert private, 'private key missing'
             cacerts = [self.openssl.convert_x509(cacert,inform=format,outform='pem')
                          for cacert in cacerts]
         else:
             certs = split_pem(cert)
-            if not private: private = cert
+            if priv and not private:
+                for key,value in iteritems(certs):
+                    if key.find('PRIVATE')>=0:
+                        private = value[0]
+                        break
             if not cacerts:
-                cacerts = split_pem(cert)['CERTIFICATE']
+                cacerts = cert['CERTIFICATE']
                 cert = cacerts.pop(0) # assume cert comes first
-        private = self.openssl.convert_key(private,passphrase=passphrase,
-                passout=passout,inform=format,outform='pem')
         info = self.openssl.decode_x509(cert)
-        key = PrivateKey(cert,private,passout,cacerts)
+        if priv:
+            assert private, 'private key missing'
+            if passphrase:
+                private = self.openssl.convert_key(private,passphrase=passphrase,
+                    inform=format,outform='pem')
+            key = PrivateKey(cert,private,None,cacerts)
+        else:
+            key = Certificate(cert,cacerts)
         for k,v in iteritems(info): setattr(key,k,v)
         if not 'email' in info: setattr(key,'email',None)
         return key
@@ -197,6 +191,20 @@ class MemoryKeyStore(OpenSSLKeyStore):
         self.fingerprints = {}
         self.emails = {}
         self.private = {} # by fingerprint
+
+    def add_key(self, key):
+        return self.add_keys([key])
+
+    def add_keys(self, keys):
+        from six import string_types
+        if isinstance(keys, string_types):
+            keys = split_pem(keys).get('CERTIFICATE',[])
+        for key in keys:
+            if not key.startswith('-----BEGIN CERTIFICATE'): raise ValueError
+            cert = self.load_cert(key)
+
+        self.keys = keys
+        return self
 
 class DirectoryKeyStore(OpenSSLKeyStore):
     def __init__(self, path):

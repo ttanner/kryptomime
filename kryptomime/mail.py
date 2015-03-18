@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# E-Mail stuff
+# Workarounds for the broken Python email package
 #
 # This file is part of kryptomime, a Python module for email kryptography.
 # Copyright © 2013,2014 Thomas Tanner <tanner@gmx.net>
@@ -29,15 +29,14 @@ def fix_lines(text,linesep='\n',replace=True,final=False):
     if not final: return text
     return text.rstrip()+linesep
 
-def get_linesep(mail): # autodetect CRLF or LF
+def get_linesep(mail):
+    "autodetect CRLF or LF in str"
     import six
     if six.PY3 and isinstance(mail,six.binary_type):
         mail = mail.decode('utf-8','ignore')
     i = mail.find('\n')
     if i>0 and mail[i-1]=='\r': return '\r\n' #CRLF
     return '\n' # default LF
-
-# workarounds for the totally broken Python email package :/
 
 import six
 
@@ -87,11 +86,13 @@ if six.PY2:
             self._linesep = None
 
         def as_string(self, unixfrom=False):
-            return mail_binary(self,unixfrom=unixfrom,linesep=self._linesep,charset=self._charset)
+            return mail_binary(self,unixfrom=unixfrom,
+                linesep=self._linesep,charset=self._charset)
 
     def mail_binary(mail,linesep=None,unixfrom=False,charset=None):
-        """work around email problem (headers are left untouched only
-        for multipart/signed but not its payloads)"""
+        "generate 8bit byte str representation of email"
+        # work around email problem (headers are left untouched only
+        # for multipart/signed but not its payloads)
         from cStringIO import StringIO
         fp = StringIO()
         g = CharsetGenerator(fp,maxheaderlen=0,mangle_from_=False,charset=charset)
@@ -119,6 +120,7 @@ else:
             return s.encode(encoding,'surrogateescape')
 
     def mail_binary(mail,linesep=None,unixfrom=False):
+        "generate 8bit byte str representation of email"
         if mail.policy.cte_type=='7bit':
             return mail.as_string()
         from io import BytesIO
@@ -137,7 +139,7 @@ def _mail_transfer_content(src,dest):
         _mail_addreplace_header(dest,key,src.get(key))
 
 def _protected(txt,linesep=None,headersonly=False,template=None,cte_type='7bit'):
-    "convert txt to a protected message without modifying the subparts. only for internal use!"
+    "convert txt to a protected message without modifying the subparts"
     from email.parser import Parser
     from email.message import Message
 
@@ -174,7 +176,10 @@ def _protected(txt,linesep=None,headersonly=False,template=None,cte_type='7bit')
     from email.parser import HeaderParser
     P = HeaderParser if headersonly else Parser
     mail = P(_class=template).parsestr(txt)
-    if charset: mail.set_charset(charset)
+    if not charset: charset = mail.get_param('charset')
+    if charset:
+        # cannot use mail.set_charset(charset), as it adds MIME-Version header
+        mail._charset = charset
     mail._linesep = linesep
     return mail
 
@@ -189,7 +194,7 @@ def protect_mail(mail,linesep='\r\n',sevenbit=True):
         cte = 'Content-Transfer-Encoding'
         if msg[cte] == '8bit' and msg.get_charset() is None:
             charset = msg.get_param('charset')
-            payload = msg.get_payload(None, False)
+            payload = msg.get_payload(decode=False)
             msg.set_payload(payload)
             msg.set_charset(charset)
         if not sevenbit: return
@@ -229,6 +234,7 @@ def protect_mail(mail,linesep='\r\n',sevenbit=True):
     return mail
 
 def check_charset(s, charset=None, use_locale=True):
+    "check or autodetect the charset of str s"
     from six import PY3
     from locale import getpreferredencoding
     import codecs
@@ -276,14 +282,18 @@ def check_charset(s, charset=None, use_locale=True):
     s.decode(charset)
     return s, charset
 
-def mail_payload(msg):
-    if msg.is_multipart():
-        return msg.get_payload()
+def mail_payload(msg, i=None):
+    """get decoded mail payload(s). i is the index or None for all payloads.
+    8bit non-text is converted to bytes"""
+    if msg.is_multipart() and i is None:
+        return [mail_payload(submsg) for submsg in msg.get_payload()]
     charset = msg.get_charset()
-    if msg['Content-Transfer-Encoding']=='8bit' and six.PY3:
-        payload = msg.get_payload(None, False)
+    ctype = msg.get_content_maintype()
+    if (six.PY3 and ctype=='text' and
+        msg['Content-Transfer-Encoding'].lower() in ('8bit','binary')):
+        payload = msg.get_payload(i, decode=False)
     else:
-        payload = msg.get_payload(None, True)
+        payload = msg.get_payload(i, decode=True)
         if not charset is None:
             payload = payload.decode(str(charset))
     return payload
@@ -299,8 +309,13 @@ def _set_header(msg,key,value,charset=None):
     else:
         msg.add_header(key,value)
 
-def create_mime(data,maintype='text',subtype='plain',charset=None,
+def create_mime(data,maintype='text',subtype=None,charset=None,
     params={}, headers={}, encoding=None):
+    """ create MIME message from data.
+    if maintype is None, the default content type is text/plain for str,
+     and application/octet-stream for binary data.
+    The default charset and encoding are automatically detected.
+    """
     from email.mime.base import MIMEBase
     from email.mime.application import MIMEApplication
     from email.mime.audio import MIMEAudio
@@ -308,21 +323,28 @@ def create_mime(data,maintype='text',subtype='plain',charset=None,
     from email.mime.message import MIMEMessage
     from email.mime.text import MIMEText
     import email.encoders, six
-    maintype = maintype.lower()
+    if maintype is None:
+        if isinstance(data,(six.text_type,)+six.string_types):
+            maintype= 'text'
+        elif isinstance(data,six.binary_type):
+            maintype,subtype = 'application', subtype or 'octet-stream'
+    else:
+        maintype = maintype.lower()
+    cte = 'Content-Transfer-Encoding'
     if maintype=='text':
+        subtype = subtype or 'plain'
         data, charset = check_charset(data,charset)
-        cte = 'Content-Transfer-Encoding'
         if encoding is None:
             msg = MIMEText(data, subtype, charset)
-        elif encoding in ('base64','quoted-printable'):
+        else:
             msg = MIMEText('', subtype, charset)
+        if encoding in ('base64','quoted-printable'):
             del msg[cte]
             if not isinstance(data,six.binary_type): data = data.encode(charset)
             msg.set_payload(data)
             if encoding=='base64': email.encoders.encode_base64(msg)
             else: email.encoders.encode_quopri(msg)
-        else:
-            msg = MIMEText('', subtype, charset)
+        elif encoding:
             if six.PY3:
                 from email.policy import default
                 policy = default.clone(cte_type='8bit' if encoding=='8bit' else '7bit')
@@ -333,15 +355,37 @@ def create_mime(data,maintype='text',subtype='plain',charset=None,
             if six.PY3 and isinstance(data,six.binary_type): data = data.decode(charset)
             msg.set_payload(data)
         if msg[cte]=='base64': # remove superflous newline
-            data = msg.get_payload(None,False)
+            data = msg.get_payload(decode=False)
             msg.set_payload(data.rstrip())
-    elif maintype=='application': msg = MIMEApplication(data, subtype, **params)
-    elif maintype=='audio': msg = MIMEAudio(data, subtype, **params)
-    elif maintype=='image': msg = MIMEImage(data, subtype, **params)
-    elif maintype=='message': msg = MIMEMessage(data, subtype)
     else:
-        msg = MIMEBase(maintype, subtype, **params)
-        msg.set_payload(data)
+        idata = data if encoding else ''
+        if maintype=='application': msg = MIMEApplication(idata, subtype, **params)
+        elif maintype=='audio': msg = MIMEAudio(idata, subtype, **params)
+        elif maintype=='image': msg = MIMEImage(idata, subtype, **params)
+        elif maintype=='message': msg = MIMEMessage(idata, subtype)
+        else:
+            msg = MIMEBase(maintype, subtype, **params)
+            encoding = encoding or 'base64'
+        if encoding in ('base64','quoted-printable'):
+            del msg[cte]
+            msg.set_payload(data)
+            if encoding=='base64': email.encoders.encode_base64(msg)
+            else: email.encoders.encode_quopri(msg)
+        elif encoding:
+            if six.PY3:
+                from email.policy import default
+                policy = default.clone(cte_type='7bit' if encoding=='7bit' else '8bit')
+                msg.policy = policy
+            msg.replace_header(cte,encoding)
+            if encoding=='7bit':
+                if isinstance(data,six.string_types): data.encode('us-ascii')
+                else: data.decode('us-ascii')
+            if six.PY3 and isinstance(data,six.binary_type):
+                data = data.decode('utf-8','surrogateescape')
+            msg.set_payload(data)
+        if msg[cte]=='base64': # remove superflous newline
+            data = msg.get_payload(decode=False)
+            msg.set_payload(data.rstrip())
     for k, v in six.iteritems(headers):
         _set_header(msg,k,v)
     return msg
@@ -354,6 +398,7 @@ def create_mail(sender,to,subject,body,cc=None,bcc=None,
     import time as time_mod
     import six
 
+    if attach: assert isinstance(attach,(list,tuple)), "attach must be a list"
     body = fix_lines(body,replace=False)
     msg = create_mime(body,subtype=subtype,charset=charset,encoding=encoding)
     if not attach is None:

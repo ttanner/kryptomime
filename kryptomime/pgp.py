@@ -328,13 +328,13 @@ class PGPMIME(KryptoMIME):
         mail, valid, results = self.decrypt(mail,strict,valid_keys,passphrase, **kwargs)
         return valid, results
 
-    def decrypt(self, mail, strict=False, valid_keys=[], passphrase=None, **kwargs):
+    def decrypt(self, mail, strict=False, valid_keys=None, passphrase=None, **kwargs):
         """Decrypts and verifies an email.
 
         :param mail: A string or email
         :type mail: string or Message object
         :param bool strict: Whether verify the message as is. Otherwise try with different line separators.
-        :param list valid_keys: keyids accepted as valid signature. By default the sender email.
+        :param list valid_keys: keyids accepted as valid signature, if signed. None=accept all.
         :param passphrase: The passphrase(s) for the secret key(s) used for decryption. If a list is
             specified, each passphrase will be tried until decryption succeeds.
         :type passphrase: str or list of str
@@ -359,12 +359,10 @@ class PGPMIME(KryptoMIME):
         elif not isinstance(mail,Message):
             raise TypeError("mail must be Message or str")
         from email.header import decode_header
-        if not valid_keys:
-            sender = mail.get('from', [])
-            sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
-            valid_keys = [self.find_key(sender)]
-        else:
-            valid_keys = [self.find_key(keyid) for keyid in valid_keys]
+        if valid_keys:
+            valid_keys = self.find_key(valid_keys).values()
+            if None in valid_keys:
+                raise KeyMissingError("public keys for valid_keys")
         ciphertext, is_pgpmime = self._ciphertext(mail)
         if ciphertext: # Ciphertext present? Decode
             results['encrypted'] = True
@@ -387,7 +385,8 @@ class PGPMIME(KryptoMIME):
                 results['fingerprints'] = [result.fingerprint]
                 results['key_ids'] = [result.key_id]
                 results['results'] = [result]
-                if result.fingerprint in valid_keys: return mail, True, results
+                if not valid_keys or result.fingerprint in valid_keys:
+                    return mail, True, results
         payload, signatures, rawmail = self._signature(mail)
         if not payload: return rawmail, False, results # no plain msg
         rawmail, sresults = self._check_signatures(payload, signatures, rawmail, strict=strict)
@@ -395,7 +394,8 @@ class PGPMIME(KryptoMIME):
         results['fingerprints'].extend(sresults['fingerprints'])
         results['key_ids'].extend(sresults['key_ids'])
         results['results'].extend(sresults['results'])
-        valid = results['signed'] and len(set(valid_keys).intersection(results['fingerprints']))
+        valid = results['signed'] and len(results['fingerprints'])
+        if valid and valid_keys: valid = len(set(valid_keys).intersection(results['fingerprints']))
         return rawmail, valid, results
 
     def sign(self, mail, inline=False, signers=None, passphrase=None, verify=False, **kwargs):
@@ -423,8 +423,8 @@ class PGPMIME(KryptoMIME):
         :param sign: Optional keyid(s) to sign with. If true, uses to the sender (From).
         :type sign: bool or str or list
         :param bool inline: Whether to use the PGP inline format for non-multipart messages.
-        :param recipients: List of keyids to encrypt for. By default the addresses in To/CC.
-        :type recipients: list or None
+        :param recipients: str or list of keyids to encrypt to. By default the addresses in To/CC.
+        :type recipients: str, list or None
         :param toself: Whether to add sender to the recipients for self-decryption.
         :type toself: bool
         :param bool verify: Whether to verify the encrypted mail immediately (toself must be enabled or recipient key be known).
@@ -439,10 +439,11 @@ class PGPMIME(KryptoMIME):
         import email.utils, six
         from email.header import decode_header
         from email.message import Message
+        from email.utils import parseaddr
         from .mail import _mail_addreplace_header, protect_mail, _protected
         def find_sender(mail):
             sender = mail.get('from','')
-            sender = email.utils.parseaddr(decode_header(sender)[0][0])[1]
+            sender = parseaddr(decode_header(sender)[0][0])[1]
             sender = self.find_key(sender,secret=True)
             if not sender: raise KeyMissingError("sender")
             return sender
@@ -453,16 +454,17 @@ class PGPMIME(KryptoMIME):
             mail = protect_mail(mail,linesep=None)
             if not recipients:
                 tos = mail.get_all('to', []) + mail.get_all('cc', [])
-                recipients = [self.find_key( email.utils.parseaddr(decode_header(to)[0][0])[1] ) for to in tos]
-            else:
-                recipients = [self.find_key( keyid ) for keyid in recipients]
+                recipients = [parseaddr(decode_header(to)[0][0])[1] for to in tos]
+            elif isinstance(recipients, six.string_types):
+                recipients = [recipients]
+            recipients = self.find_key(recipients).values()
             if None in recipients:
                 raise KeyMissingError("public keys for recipients")
-            if sign==True or toself: sender = find_sender(mail)
+            if sign==True or toself: sender = find_sender(mail) # use default_key?
             if toself and not sender in recipients: recipients.append(sender)
         else:
             mail = protect_mail(mail,linesep='\r\n',sevenbit=True) # fix line separators + 7bit RFC2822
-            if sign==True: sender = find_sender(mail)
+            if sign==True: sender = find_sender(mail) # use default_key?
         if sign:
             if sign==True:
                 sign = sender
@@ -547,23 +549,29 @@ class PGPMIME(KryptoMIME):
                 mail.attach(submsg)
         return mail, result
 
-def find_gnupg_key(gpg,addr,secret=False,key_ids=False):
-    """find keyid for email 'addr' or return None.
-    If addr is a list or tuple, return a dict(addr:fingerprint) """
-    import email.utils
-    if type(addr) in (list,tuple):
+def find_gnupg_key(gpg,keyid,secret=False):
+    """find key with fingerprint or email 'keyid'.
+    return fingerprint or None, if not found.
+    If keyid is a list or tuple, return a dict(keyid:fingerprint) """
+    if type(keyid) in (list,tuple):
         result = {}
-        for a in addr: result[a] = find_gnupg_key(gpg,a,secret)
+        for k in keyid: result[k] = find_gnupg_key(gpg,k,secret)
         return result
+    keys = gpg.list_keys(secret)
+    if not '@' in keyid: # not an email
+        for key in keys:
+            fingerprint = key['fingerprint']
+            if keyid in (key['keyid'],fingerprint):
+                return fingerprint
+        return None
+    import email.utils
     from email.header import decode_header
-    addr = decode_header(addr)[0][0]
+    addr = decode_header(keyid)[0][0]
     addr = email.utils.parseaddr(addr)[1]
     if not addr: return None
-    for key in gpg.list_keys(secret):
+    for key in keys:
         for uid in key['uids']:
-            if uid.find(addr)>=0:
-                if key_ids: return key['keyid']
-                return key['fingerprint']
+            if uid.find(addr)>=0: return key['fingerprint']
     return None
 
 class GPGMIME(PGPMIME):

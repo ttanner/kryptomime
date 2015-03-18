@@ -77,6 +77,31 @@ line2
     prot = protect_mail(msg,linesep='\r\n')
     assert fix_lines(msg.get_payload(),'\r\n') == prot.get_payload()
 
+def test_payload():
+    body = 'body\nmessage'
+    ubody = u'bödy\nmessäge'
+    enc8 = ('base64','quoted-printable','8bit')
+    for uni in range(2):
+        encodings = enc8 if uni else ['7bit']
+        for enc in encodings:
+            msg = create_mail(sender,receiver,'subject',
+                ubody if uni else body,charset='UTF-8' if uni else 'us-ascii',
+                encoding=enc)
+            txt = mail_payload(msg)
+            if uni: assert txt == ubody
+            else: assert txt == body
+    binary = b'\xc3\n\xf1'
+    for encoding in enc8:
+        att = create_mime(binary,'application','octet-stream',encoding=encoding)
+        msg = create_mail(sender,receiver,'subject',body,attach=[att])
+        cont = mail_payload(msg)
+        assert len(cont)==2 and cont[0]==body and cont[1]==binary
+    with raises(UnicodeError):
+        create_mime(binary,'application','octet-stream',encoding='7bit')
+    body = b'body\nmessage'
+    att = create_mime(body,'application','octet-stream',encoding='7bit')
+    assert mail_payload(att)==body
+
 def test_attach():
     attachment = create_mime('some\nattachment')
     msg = create_mail(sender,receiver,'subject','body\nmessage',attach=[attachment])
@@ -252,7 +277,7 @@ def test_unicode():
     _mail_addreplace_header(msg,'X-Spam','Yes')
     assert msg['X-Spam'] == 'Yes'
     assert msg.get_charset() == 'UTF-8'
-    assert msg.get_payload(decode=True).decode('UTF-8') == ubody
+    assert mail_payload(msg) == ubody
 
     attachment = 'some\nattachment'
     uattachment = u'söme\nattachment'

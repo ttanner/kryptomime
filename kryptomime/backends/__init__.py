@@ -20,6 +20,23 @@
 
 import os, six
 
+def escape_split(s, delim):
+    "split string by delim (multi-char allowed), taking into account escaping"
+    i, res, buf = 0, [], ''
+    while True:
+        j, e = s.find(delim, i), 0
+        if j < 0:  # end reached
+            return res + [buf + s[i:]]  # add remainder
+        while j - e and s[j - e - 1] == '\\':
+            e += 1  # number of escapes
+        d = e // 2  # number of double escapes
+        if e != d * 2:  # odd number of escapes
+            buf += s[i:j - d - 1] + s[j]  # add the escaped char
+            i = j + 1  # and skip it
+            continue  # add more to buf
+        res.append(buf + s[i:j - d])
+        i, buf = j + len(delim), ''  # start after delim
+
 ASN_abbrevations = dict( # abbrevations
         CN='commonName',
         C='countryName',
@@ -35,14 +52,22 @@ def create_DN(dname,separator='\n',expand=False):
     from six import iteritems
     if isinstance(dname,dict):
         if expand:
-            dname = (ASN_abbrevations.get(k,k)+'='+v for k,v in iteritems(dname))
-        else: dname = (k+'='+v for k,v in iteritems(dname))
+            dname = [ASN_abbrevations.get(k,k)+'="%s"' % v for k,v in iteritems(dname)]
+        else: dname = [k+'="%s"' % v for k,v in iteritems(dname)]
         return separator.join(dname)
     return dname
 
-def parse_DN(dname,separator='/'):
+def parse_DN(dname,separator=None):
+    if isinstance(dname,dict): return dname
+    if separator is None:
+        if '\n' in dname: names = dname.splitlines()
+        elif dname[:1]=='/':
+            names = escape_split(dname,'/')[1:]
+        else: names = escape_split(dname,',')
+        if not names[-1]: names.pop()
+    else: names = escape_split(dname,separator)
     res = {}
-    for rdn in dname.split(separator):
+    for rdn in names:
         if not rdn: continue
         i = rdn.index('=')
         key,value = rdn[:i].strip(),rdn[i+1:].strip()
