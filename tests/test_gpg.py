@@ -25,7 +25,7 @@ from itertools import product
 from kryptomime import KeyMissingError
 from kryptomime.mail import create_mail, create_mime, protect_mail
 from kryptomime.pgp import GPGMIME, find_gnupg_key
-from kryptomime.backends import tmpfname
+from kryptomime.utils import tmpfname
 
 import gnupg, email.mime.text
 

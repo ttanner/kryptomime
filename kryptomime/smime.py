@@ -19,8 +19,8 @@
 # For more details see the file COPYING.
 
 from .core import KryptoMIME, make_list
-from .backends.openssl import OpenSSL, OpenSSL_CA
-from .backends import create_DN, parse_DN, split_pem
+from .openssl import OpenSSL, OpenSSL_CA
+from .utils import create_DN, parse_DN, split_pem
 
 class SMIME(KryptoMIME):
     def __init__(self, default_key=None, key_store=None):

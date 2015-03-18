@@ -20,7 +20,7 @@
 
 from __future__ import print_function
 
-from . import (tmpfname, TmpDir, runcmd, SubProcessError,
+from .utils import (tmpfname, TmpDir, runcmd, SubProcessError,
     ASN_abbrevations, create_DN, parse_DN, split_pem)
 from collections import OrderedDict
 import os
@@ -132,7 +132,7 @@ def _parse_text(lines,i,prefix):
 
 class OpenSSL(object):
     def __init__(self,executable=None,timeout=None):
-        from . import find_binary
+        from .utils import find_binary
         import re
         self.openssl = find_binary(executable, 'openssl')
         versionstr, error = runcmd([self.openssl,'version'],stringio=True)

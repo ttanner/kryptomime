@@ -24,8 +24,8 @@ from pytest import fixture, mark, raises
 from kryptomime import KeyMissingError
 from kryptomime.mail import create_mail, protect_mail
 from kryptomime.smime import Certificate, PrivateKey, MemoryKeyStore
-from kryptomime.backends import split_pem
-from kryptomime.backends.openssl import OpenSSL, OpenSSL_CA
+from kryptomime.utils import split_pem
+from kryptomime.openssl import OpenSSL, OpenSSL_CA
 
 import email.mime.text
 
