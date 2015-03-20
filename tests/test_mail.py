@@ -91,10 +91,19 @@ def test_payload():
             txt = mail_payload(msg)
             if uni: assert txt == ubody
             else: assert txt == body
+            txt = mail_payload(msg.as_string())
+            if uni: assert txt == ubody
+            else: assert txt == body
+            txt = mail_payload(mail_binary(msg))
+            if uni: assert txt == ubody
+            else: assert txt == body
     binary = b'\xc3\n\xf1'
     for encoding in enc8:
         att = create_mime(binary,'application','octet-stream',encoding=encoding)
         msg = create_mail(sender,receiver,'subject',body,attach=[att])
+        cont = mail_payload(msg)
+        assert len(cont)==2 and cont[0]==body and cont[1]==binary
+        msg = mail_binary(msg)
         cont = mail_payload(msg)
         assert len(cont)==2 and cont[0]==body and cont[1]==binary
     with raises(UnicodeError):

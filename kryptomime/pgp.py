@@ -87,7 +87,7 @@ class PGPMIME(KryptoMIME):
         is_pgpmime = False
         # Check: Is inline pgp?
         from .mail import protect_mail
-        if type(mail)==str: mail = protect_mail(mail,linesep=None)
+        if type(mail)==str: mail = protect_mail(mail,linesep=None,sevenbit=False)
         if mail.get_content_type()=='application/pgp' or mail.get_param('x-action')=='pgp-encrypted':
             ciphertext = mail.get_payload()
             is_pgpmime = False
@@ -214,8 +214,8 @@ class PGPMIME(KryptoMIME):
         # Check transfer type
         from .mail import _mail_addreplace_header, _mail_transfer_content
         from .mail import protect_mail
-        mail = protect_mail(mail,linesep=None)
-        tmpmsg = protect_mail(plaintext,linesep=None)
+        mail = protect_mail(mail,linesep=None,sevenbit=False)
+        tmpmsg = protect_mail(plaintext,linesep=None,sevenbit=False)
         if mail.get_content_type()=='application/pgp': mail.set_type("text/plain")
         mail.del_param("x-action")
         if tmpmsg.is_multipart() and len(tmpmsg.get_payload())==1:
@@ -257,7 +257,7 @@ class PGPMIME(KryptoMIME):
         """
         from email.message import Message
         from .mail import protect_mail
-        if type(mail)==str: mail = protect_mail(mail,linesep=None)
+        if type(mail)==str: mail = protect_mail(mail,linesep=None,sevenbit=False)
         elif not isinstance(mail,Message):
             raise TypeError("mail must be Message or str")
         payload, signatures, rawmail = self._signature(mail)
@@ -356,7 +356,7 @@ class PGPMIME(KryptoMIME):
         from .mail import protect_mail
         import email.utils, six
         if isinstance(mail, six.string_types):
-            mail = protect_mail(mail,linesep=None)
+            mail = protect_mail(mail,linesep=None,sevenbit=False)
         elif not isinstance(mail,Message):
             raise TypeError("mail must be Message or str")
         from email.header import decode_header
@@ -452,7 +452,7 @@ class PGPMIME(KryptoMIME):
         if not isinstance(mail,(Message,)+six.string_types):
             raise TypeError("mail must be Message or str")
         if encrypt:
-            mail = protect_mail(mail,linesep=None)
+            mail = protect_mail(mail,linesep=None,sevenbit=False)
             if not recipients:
                 tos = mail.get_all('to', []) + mail.get_all('cc', [])
                 recipients = [parseaddr(decode_header(to)[0][0])[1] for to in tos]

@@ -40,9 +40,9 @@ def get_linesep(mail):
     return '\n' # default LF
 
 import six
+from email.message import Message
 
 if six.PY2:
-    from email.message import Message
     from email.generator import Generator
 
     class CharsetGenerator(Generator):
@@ -90,6 +90,8 @@ if six.PY2:
             return mail_binary(self,unixfrom=unixfrom,
                 linesep=self._linesep,charset=self._charset)
 
+        as_bytes = as_string # py3 compatibility
+
     def mail_binary(mail,linesep=None,unixfrom=False,charset=None):
         "generate 8bit byte str representation of email"
         # work around email problem (headers are left untouched only
@@ -104,11 +106,12 @@ if six.PY2:
 
 else:
     from email.generator import BytesGenerator
+    ProtectedMessage = Message
 
     class CharsetGenerator(BytesGenerator):
         def flatten(self, msg, unixfrom=False, linesep=None):
             from email.charset import Charset
-            charset = msg.get_charset()
+            charset = msg.get_content_charset()
             self._encoding = str(charset) if type(charset)==Charset else charset
             super().flatten(msg, unixfrom, linesep)
         def write(self, s):
@@ -126,7 +129,7 @@ else:
             return mail.as_string()
         from io import BytesIO
         with BytesIO() as fp:
-            g = CharsetGenerator(fp,maxheaderlen=0,mangle_from_=False)
+            g = CharsetGenerator(fp,maxheaderlen=0,mangle_from_=False, policy=mail.policy)
             g.flatten(mail, unixfrom=unixfrom, linesep=linesep)
             return fp.getvalue()
 
@@ -168,7 +171,7 @@ def _protected(txt,linesep=None,headersonly=False,template=None,cte_type='7bit')
         charset = txt._charset
         txt = txt.as_string()
     elif isinstance(txt,Message):
-        charset = txt.get_charset()
+        charset = txt.get_content_charset()
         txt = mail_binary(txt)
     else: charset = None
     if linesep is None: linesep = get_linesep(txt)
@@ -177,7 +180,7 @@ def _protected(txt,linesep=None,headersonly=False,template=None,cte_type='7bit')
     from email.parser import HeaderParser
     P = HeaderParser if headersonly else Parser
     mail = P(_class=template).parsestr(txt)
-    if not charset: charset = mail.get_param('charset')
+    if not charset: charset = mail.get_content_charset()
     if charset:
         # cannot use mail.set_charset(charset), as it adds MIME-Version header
         mail._charset = charset
@@ -193,8 +196,9 @@ def protect_mail(mail,linesep='\r\n',sevenbit=True):
 
     def fix_encoding(msg):
         cte = 'Content-Transfer-Encoding'
-        if msg[cte] == '8bit' and msg.get_charset() is None:
-            charset = msg.get_param('charset')
+        if msg[cte] == '8bit' and msg.get_content_maintype()=='text' and msg.get_charset() is None:
+            charset = msg.get_content_charset()
+            if not charset: return #broken
             payload = msg.get_payload(decode=False)
             msg.set_payload(payload)
             msg.set_charset(charset)
@@ -231,7 +235,10 @@ def protect_mail(mail,linesep='\r\n',sevenbit=True):
         for submsg in converted: mail.attach(submsg)
     else:
         fix_encoding(mail)
-        mail.set_payload(fix_lines(mail.get_payload(),linesep=linesep))
+        if linesep:
+            payload = mail.get_payload()
+            if isinstance(payload,six.string_types):
+                mail.set_payload(fix_lines(payload,linesep=linesep))
     return mail
 
 def check_charset(s, charset=None, use_locale=True):
@@ -286,9 +293,12 @@ def check_charset(s, charset=None, use_locale=True):
 def mail_payload(msg, i=None):
     """get decoded mail payload(s). i is the index or None for all payloads.
     8bit non-text is converted to bytes"""
+    from email.message import Message
+    if not isinstance(msg, Message):
+        msg = protect_mail(msg,linesep=None,sevenbit=False)
     if msg.is_multipart() and i is None:
         return [mail_payload(submsg) for submsg in msg.get_payload()]
-    charset = msg.get_charset()
+    charset = msg.get_content_charset()
     ctype = msg.get_content_maintype()
     if (six.PY3 and ctype=='text' and
         msg['Content-Transfer-Encoding'].lower() in ('8bit','binary')):
